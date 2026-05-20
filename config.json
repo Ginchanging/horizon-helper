@@ -1,0 +1,6 @@
+{
+  "sourcePath": "C:\\XboxGames\\GameSave\\pgs",
+  "backupRoot": "backups",
+  "debounceSeconds": 30,
+  "maxBackups": 30
+}
