@@ -26,7 +26,7 @@ function Get-BackupConfig {
 
     $resolvedConfigPath = (Resolve-Path -LiteralPath $ConfigPath).ProviderPath
     $appRoot = Split-Path -Parent $resolvedConfigPath
-    $rawConfig = Get-Content -LiteralPath $resolvedConfigPath -Raw
+    $rawConfig = Get-Content -LiteralPath $resolvedConfigPath -Raw -Encoding UTF8
     $json = $rawConfig | ConvertFrom-Json
 
     $sourcePathValue = if ($json.PSObject.Properties.Name -contains 'sourcePath') { [string]$json.sourcePath } else { '' }

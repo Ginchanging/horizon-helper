@@ -46,6 +46,18 @@ $rootFiles = @(
     'StopBackup.ps1',
     'StatusBackup.cmd',
     'StatusBackup.ps1',
+    'StartAfk.cmd',
+    'StartAfk.ps1',
+    'StopAfk.cmd',
+    'StopAfk.ps1',
+    'StatusAfk.cmd',
+    'StatusAfk.ps1',
+    'StartAutomation.cmd',
+    'StartAutomation.ps1',
+    'StopAutomation.cmd',
+    'StopAutomation.ps1',
+    'StatusAutomation.cmd',
+    'StatusAutomation.ps1',
     'StartFocusLock.cmd',
     'StartFocusLock.ps1',
     'StopFocusLock.cmd',
@@ -54,13 +66,18 @@ $rootFiles = @(
     'StatusFocusLock.ps1',
     'config.json',
     'README.md',
-    'README.zh-CN.md'
+    'README.zh-CN.md',
+    'BLOG.zh-CN.md'
 )
 
 $scriptFiles = @(
+    'AfkLib.ps1',
+    'AutomationLib.ps1',
     'BackupLib.ps1',
     'FocusLib.ps1',
     'KeepWindowFocused.ps1',
+    'RunAfk.ps1',
+    'RunAutomation.ps1',
     'WatchBackup.ps1'
 )
 

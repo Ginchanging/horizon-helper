@@ -2,5 +2,88 @@
   "sourcePath": "C:\\XboxGames\\GameSave\\pgs",
   "backupRoot": "backups",
   "debounceSeconds": 30,
-  "maxBackups": 30
+  "maxBackups": 30,
+  "afk": {
+    "startupDelaySeconds": 5,
+    "keyTapHoldMilliseconds": 50,
+    "inputMethod": "SendKeys",
+    "sequence": {
+      "enterDelaySeconds": 40,
+      "xDelayMilliseconds": 500,
+      "loopDelaySeconds": 10
+    },
+    "enterEvery10s": {
+      "delaySeconds": 10
+    },
+    "macroCombo": {
+      "cycleDelaySeconds": 20,
+      "steps": [
+        { "key": "Esc", "waitMilliseconds": 2000 },
+        { "key": "W", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "D", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "W", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "W", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "W", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "A", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "Esc", "waitMilliseconds": 1000 },
+        { "key": "Esc", "waitMilliseconds": 1000 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 200 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 0 }
+      ]
+    }
+  },
+  "automation": {
+    "startupDelaySeconds": 5,
+    "keyTapHoldMilliseconds": 50,
+    "inputMethod": "SendKeys",
+    "autoBuyCar": {
+      "loopCount": 1,
+      "betweenLoopsMilliseconds": 1000,
+      "steps": [
+        { "key": "Space", "waitMilliseconds": 1000 },
+        { "key": "Down", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "Enter", "waitMilliseconds": 0 }
+      ]
+    },
+    "findNewSubaru": {
+      "loopCount": 1,
+      "betweenLoopsMilliseconds": 3000,
+      "maxSearchAttempts": 50,
+      "searchKey": "Left",
+      "searchSettleMilliseconds": 500,
+      "afterSelectDelayMilliseconds": 4000,
+      "targetKeywords": [
+        "1998",
+        "斯巴鲁"
+      ],
+      "newBadgeText": "全新",
+      "requireTargetConfirmation": true,
+      "verticalScanSteps": 2
+    }
+  }
 }

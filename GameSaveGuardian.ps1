@@ -8,6 +8,8 @@ $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Par
 
 . (Join-Path $scriptRoot 'scripts\BackupLib.ps1')
 . (Join-Path $scriptRoot 'scripts\FocusLib.ps1')
+. (Join-Path $scriptRoot 'scripts\AfkLib.ps1')
+. (Join-Path $scriptRoot 'scripts\AutomationLib.ps1')
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -21,6 +23,22 @@ function Get-AppBackupConfig {
 
 function Get-AppFocusPaths {
     Get-FocusPaths -AppRoot $scriptRoot
+}
+
+function Get-AppAfkPaths {
+    Get-AfkPaths -AppRoot $scriptRoot
+}
+
+function Get-AppAfkConfig {
+    Get-AfkConfig -AppRoot $scriptRoot
+}
+
+function Get-AppAutomationPaths {
+    Get-AutomationPaths -AppRoot $scriptRoot
+}
+
+function Get-AppAutomationConfig {
+    Get-AutomationConfig -AppRoot $scriptRoot
 }
 
 function Show-AppMessage {
@@ -191,6 +209,167 @@ function Stop-AppFocusLock {
     return $state.Message
 }
 
+function Start-AppAfk {
+    param(
+        [ValidateSet('Sequence', 'EnterEvery10s', 'MacroCombo')][string]$Mode = 'Sequence'
+    )
+
+    $paths = Get-AppAfkPaths
+    Initialize-AfkWorkspace -Paths $paths
+    $afkConfig = Get-AppAfkConfig
+    $options = Resolve-AfkRuntimeOptions -Config $afkConfig
+
+    $automationPaths = Get-AppAutomationPaths
+    Initialize-AutomationWorkspace -Paths $automationPaths
+    $automationState = Get-AutomationState -Paths $automationPaths
+    if ($automationState.Status -in @('Running', 'RunningUnverified')) {
+        throw "Automation is already running. Stop Automation before starting AFK. Automation PID=$($automationState.Pid)"
+    }
+
+    $state = Get-AfkState -Paths $paths
+    if ($state.Status -in @('Running', 'RunningUnverified')) {
+        return $state.Message
+    }
+
+    Remove-StaleAfkPid -Paths $paths -State $state
+
+    $workerScript = Join-Path $scriptRoot 'scripts\RunAfk.ps1'
+    $argumentList = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-STA',
+        '-File', ('"{0}"' -f $workerScript),
+        '-AppRoot', ('"{0}"' -f $scriptRoot),
+        '-Mode', $Mode,
+        '-StartupDelaySeconds', ([string]$options.StartupDelaySeconds),
+        '-EnterDelaySeconds', ([string]$options.EnterDelaySeconds),
+        '-XDelayMilliseconds', ([string]$options.XDelayMilliseconds),
+        '-LoopDelaySeconds', ([string]$options.LoopDelaySeconds),
+        '-EnterOnlyDelaySeconds', ([string]$options.EnterOnlyDelaySeconds),
+        '-KeyTapHoldMilliseconds', ([string]$options.KeyTapHoldMilliseconds),
+        '-MacroComboCycleDelaySeconds', ([string]$options.MacroComboCycleDelaySeconds),
+        '-InputMethod', $options.InputMethod
+    )
+
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -WindowStyle Hidden -PassThru
+    $newState = $null
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        Start-Sleep -Milliseconds 300
+        $newState = Get-AfkState -Paths $paths
+        if ($newState.Status -in @('Running', 'RunningUnverified') -or $process.HasExited) {
+            break
+        }
+    }
+
+    if ($newState -and $newState.Status -in @('Running', 'RunningUnverified')) {
+        return "AFK started. PID=$($newState.Pid). Mode=$Mode. InputMethod=$($options.InputMethod). Switch to the game window within $($options.StartupDelaySeconds) seconds."
+    }
+
+    if ($process.HasExited) {
+        throw "AFK exited early. Check log: $($paths.LogPath)"
+    }
+
+    return "AFK process started. PID=$($process.Id)"
+}
+
+function Stop-AppAfk {
+    $paths = Get-AppAfkPaths
+    Initialize-AfkWorkspace -Paths $paths
+    $state = Get-AfkState -Paths $paths
+
+    if ($state.Status -in @('Running', 'RunningUnverified')) {
+        Release-AfkKeys
+        Stop-Process -Id $state.Pid -Force -ErrorAction Stop
+        Start-Sleep -Milliseconds 300
+        Release-AfkKeys
+        Remove-AfkPid -Paths $paths
+        Write-AfkLog -Paths $paths -Level 'INFO' -Message "AFK stopped by GUI. PID=$($state.Pid) W key released."
+        return "AFK stopped. PID=$($state.Pid). W key released."
+    }
+
+    Release-AfkKeys
+    Remove-StaleAfkPid -Paths $paths -State $state
+    return "$($state.Message) W key released."
+}
+
+function Start-AppAutomation {
+    param(
+        [ValidateSet('AutoBuyCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
+        [int]$LoopCount = -1
+    )
+
+    $paths = Get-AppAutomationPaths
+    Initialize-AutomationWorkspace -Paths $paths
+    $config = Get-AppAutomationConfig
+    $options = Resolve-AutomationRuntimeOptions -Config $config -Mode $Mode -LoopCount $LoopCount
+
+    $afkPaths = Get-AppAfkPaths
+    Initialize-AfkWorkspace -Paths $afkPaths
+    $afkState = Get-AfkState -Paths $afkPaths
+    if ($afkState.Status -in @('Running', 'RunningUnverified')) {
+        throw "AFK is already running. Stop AFK before starting Automation. AFK PID=$($afkState.Pid)"
+    }
+
+    $state = Get-AutomationState -Paths $paths
+    if ($state.Status -in @('Running', 'RunningUnverified')) {
+        return $state.Message
+    }
+
+    Remove-StaleAutomationPid -Paths $paths -State $state
+
+    $workerScript = Join-Path $scriptRoot 'scripts\RunAutomation.ps1'
+    $argumentList = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-STA',
+        '-File', ('"{0}"' -f $workerScript),
+        '-AppRoot', ('"{0}"' -f $scriptRoot),
+        '-Mode', $Mode,
+        '-LoopCount', ([string]$options.LoopCount),
+        '-StartupDelaySeconds', ([string]$options.StartupDelaySeconds)
+    )
+
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -WindowStyle Hidden -PassThru
+    $newState = $null
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        Start-Sleep -Milliseconds 300
+        $newState = Get-AutomationState -Paths $paths
+        if ($newState.Status -in @('Running', 'RunningUnverified') -or $process.HasExited) {
+            break
+        }
+    }
+
+    if ($newState -and $newState.Status -in @('Running', 'RunningUnverified')) {
+        return "Automation started. PID=$($newState.Pid). Mode=$Mode. LoopCount=$($options.LoopCount). InputMethod=$($options.InputMethod). Switch to the game window within $($options.StartupDelaySeconds) seconds."
+    }
+
+    if ($process.HasExited) {
+        throw "Automation exited early. Check log: $($paths.LogPath)"
+    }
+
+    return "Automation process started. PID=$($process.Id)"
+}
+
+function Stop-AppAutomation {
+    $paths = Get-AppAutomationPaths
+    Initialize-AutomationWorkspace -Paths $paths
+    $state = Get-AutomationState -Paths $paths
+
+    if ($state.Status -in @('Running', 'RunningUnverified')) {
+        Release-AfkKeys
+        Stop-Process -Id $state.Pid -Force -ErrorAction Stop
+        Start-Sleep -Milliseconds 300
+        Release-AfkKeys
+        Remove-AutomationPid -Paths $paths
+        Write-AutomationLog -Paths $paths -Level 'INFO' -Message "Automation stopped by GUI. PID=$($state.Pid)"
+        return "Automation stopped. PID=$($state.Pid)"
+    }
+
+    Release-AfkKeys
+    Remove-StaleAutomationPid -Paths $paths -State $state
+    return $state.Message
+}
+
 if ($SelfTest) {
     $config = Get-AppBackupConfig
     Initialize-BackupWorkspace -Config $config
@@ -198,6 +377,17 @@ if ($SelfTest) {
     $focusPaths = Get-AppFocusPaths
     Initialize-FocusWorkspace -Paths $focusPaths
     $focusState = Get-FocusLockState -Paths $focusPaths
+    $afkPaths = Get-AppAfkPaths
+    Initialize-AfkWorkspace -Paths $afkPaths
+    $afkConfig = Get-AppAfkConfig
+    $afkOptions = Resolve-AfkRuntimeOptions -Config $afkConfig
+    $afkState = Get-AfkState -Paths $afkPaths
+    $automationPaths = Get-AppAutomationPaths
+    Initialize-AutomationWorkspace -Paths $automationPaths
+    $automationConfig = Get-AppAutomationConfig
+    $autoBuyOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'AutoBuyCar'
+    $findOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'FindNewSubaru'
+    $automationState = Get-AutomationState -Paths $automationPaths
     $windowCount = @(Get-FocusWindowList).Count
 
     Write-Host 'GameSave Guardian self-test passed.'
@@ -205,6 +395,15 @@ if ($SelfTest) {
     Write-Host "Backups: $($config.BackupRoot)"
     Write-Host "Auto backup status: $($backupState.Status)"
     Write-Host "Focus lock status: $($focusState.Status)"
+    Write-Host "AFK status: $($afkState.Status)"
+    Write-Host "AFK startup delay: $($afkOptions.StartupDelaySeconds)"
+    Write-Host "AFK input method: $($afkOptions.InputMethod)"
+    Write-Host "AFK MacroCombo steps: $(@($afkOptions.MacroComboSteps).Count)"
+    Write-Host "Automation status: $($automationState.Status)"
+    Write-Host "AutoBuyCar loop count: $($autoBuyOptions.LoopCount)"
+    Write-Host "Automation input method: $($autoBuyOptions.InputMethod)"
+    Write-Host "FindNewSubaru max attempts: $($findOptions.FindNewSubaruMaxSearchAttempts)"
+    Write-Host "FindNewSubaru after-select delay: $($findOptions.FindNewSubaruAfterSelectDelayMilliseconds) ms"
     Write-Host "Visible windows: $windowCount"
     exit 0
 }
@@ -227,6 +426,14 @@ $tabs.TabPages.Add($backupTab)
 $focusTab = New-Object System.Windows.Forms.TabPage
 $focusTab.Text = 'Focus Lock'
 $tabs.TabPages.Add($focusTab)
+
+$afkTab = New-Object System.Windows.Forms.TabPage
+$afkTab.Text = 'AFK'
+$tabs.TabPages.Add($afkTab)
+
+$automationTab = New-Object System.Windows.Forms.TabPage
+$automationTab.Text = 'Automation'
+$tabs.TabPages.Add($automationTab)
 
 $backupStatusLabel = New-Object System.Windows.Forms.Label
 $backupStatusLabel.Location = New-Object System.Drawing.Point(16, 16)
@@ -347,6 +554,123 @@ $openFocusLogButton = New-AppButton -Text 'Open Focus Log'
 @($refreshWindowsButton, $startFocusButton, $stopFocusButton, $refreshFocusButton, $openFocusLogButton) |
     ForEach-Object { $focusButtonPanel.Controls.Add($_) }
 
+$afkStatusLabel = New-Object System.Windows.Forms.Label
+$afkStatusLabel.Location = New-Object System.Drawing.Point(16, 16)
+$afkStatusLabel.Size = New-Object System.Drawing.Size(760, 22)
+$afkStatusLabel.Text = 'Status: loading...'
+$afkTab.Controls.Add($afkStatusLabel)
+
+$afkModeLabel = New-Object System.Windows.Forms.Label
+$afkModeLabel.Location = New-Object System.Drawing.Point(16, 50)
+$afkModeLabel.Size = New-Object System.Drawing.Size(110, 24)
+$afkModeLabel.Text = 'AFK mode'
+$afkTab.Controls.Add($afkModeLabel)
+
+$afkModeCombo = New-Object System.Windows.Forms.ComboBox
+$afkModeCombo.Location = New-Object System.Drawing.Point(132, 48)
+$afkModeCombo.Size = New-Object System.Drawing.Size(260, 24)
+$afkModeCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+[void]$afkModeCombo.Items.Add('Sequence')
+[void]$afkModeCombo.Items.Add('EnterEvery10s')
+[void]$afkModeCombo.Items.Add('MacroCombo')
+$afkModeCombo.SelectedIndex = 0
+$afkTab.Controls.Add($afkModeCombo)
+
+$afkInfoBox = New-Object System.Windows.Forms.TextBox
+$afkInfoBox.Location = New-Object System.Drawing.Point(16, 86)
+$afkInfoBox.Size = New-Object System.Drawing.Size(746, 120)
+$afkInfoBox.Multiline = $true
+$afkInfoBox.ReadOnly = $true
+$afkInfoBox.Text = "AFK sends keys to the current foreground window. Before starting, switch to the game within the configured countdown.`r`nAFK timing values and input method are read from config.json: startup delay, Sequence waits, EnterEvery10s delay, key tap hold time, MacroCombo steps, MacroCombo cycle delay, and afk.inputMethod.`r`nStop AFK also sends a W key-up as a safety fallback."
+$afkTab.Controls.Add($afkInfoBox)
+
+$afkButtonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$afkButtonPanel.Location = New-Object System.Drawing.Point(16, 224)
+$afkButtonPanel.Size = New-Object System.Drawing.Size(760, 86)
+$afkButtonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$afkButtonPanel.WrapContents = $true
+$afkTab.Controls.Add($afkButtonPanel)
+
+$startAfkButton = New-AppButton -Text 'Start AFK'
+$stopAfkButton = New-AppButton -Text 'Stop AFK'
+$refreshAfkButton = New-AppButton -Text 'Refresh Status'
+$openAfkLogButton = New-AppButton -Text 'Open AFK Log'
+@($startAfkButton, $stopAfkButton, $refreshAfkButton, $openAfkLogButton) |
+    ForEach-Object { $afkButtonPanel.Controls.Add($_) }
+
+$afkLogBox = New-Object System.Windows.Forms.TextBox
+$afkLogBox.Location = New-Object System.Drawing.Point(16, 332)
+$afkLogBox.Size = New-Object System.Drawing.Size(746, 196)
+$afkLogBox.Multiline = $true
+$afkLogBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+$afkLogBox.ReadOnly = $true
+$afkTab.Controls.Add($afkLogBox)
+
+$automationStatusLabel = New-Object System.Windows.Forms.Label
+$automationStatusLabel.Location = New-Object System.Drawing.Point(16, 16)
+$automationStatusLabel.Size = New-Object System.Drawing.Size(760, 22)
+$automationStatusLabel.Text = 'Status: loading...'
+$automationTab.Controls.Add($automationStatusLabel)
+
+$automationModeLabel = New-Object System.Windows.Forms.Label
+$automationModeLabel.Location = New-Object System.Drawing.Point(16, 50)
+$automationModeLabel.Size = New-Object System.Drawing.Size(110, 24)
+$automationModeLabel.Text = 'Mode'
+$automationTab.Controls.Add($automationModeLabel)
+
+$automationModeCombo = New-Object System.Windows.Forms.ComboBox
+$automationModeCombo.Location = New-Object System.Drawing.Point(132, 48)
+$automationModeCombo.Size = New-Object System.Drawing.Size(220, 24)
+$automationModeCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+[void]$automationModeCombo.Items.Add('AutoBuyCar')
+[void]$automationModeCombo.Items.Add('FindNewSubaru')
+$automationModeCombo.SelectedIndex = 0
+$automationTab.Controls.Add($automationModeCombo)
+
+$automationLoopLabel = New-Object System.Windows.Forms.Label
+$automationLoopLabel.Location = New-Object System.Drawing.Point(382, 50)
+$automationLoopLabel.Size = New-Object System.Drawing.Size(90, 24)
+$automationLoopLabel.Text = 'Loop count'
+$automationTab.Controls.Add($automationLoopLabel)
+
+$automationLoopInput = New-Object System.Windows.Forms.NumericUpDown
+$automationLoopInput.Location = New-Object System.Drawing.Point(478, 48)
+$automationLoopInput.Size = New-Object System.Drawing.Size(100, 24)
+$automationLoopInput.Minimum = 1
+$automationLoopInput.Maximum = 999
+$automationLoopInput.Value = 1
+$automationTab.Controls.Add($automationLoopInput)
+
+$automationInfoBox = New-Object System.Windows.Forms.TextBox
+$automationInfoBox.Location = New-Object System.Drawing.Point(16, 86)
+$automationInfoBox.Size = New-Object System.Drawing.Size(746, 134)
+$automationInfoBox.Multiline = $true
+$automationInfoBox.ReadOnly = $true
+$automationInfoBox.Text = "Automation sends keys to the current foreground game window after a countdown.`r`nDefault input method is SendKeys, matching the original simple AFK script more closely. You can change automation.inputMethod in config.json.`r`nAutoBuyCar repeats: Space, Down, Enter, Enter, Enter with configured waits.`r`nFindNewSubaru searches left until it finds a new 1998 Subaru, selects it, waits for the configured delay, then runs AFK MacroCombo."
+$automationTab.Controls.Add($automationInfoBox)
+
+$automationButtonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$automationButtonPanel.Location = New-Object System.Drawing.Point(16, 238)
+$automationButtonPanel.Size = New-Object System.Drawing.Size(760, 86)
+$automationButtonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$automationButtonPanel.WrapContents = $true
+$automationTab.Controls.Add($automationButtonPanel)
+
+$startAutomationButton = New-AppButton -Text 'Start Automation'
+$stopAutomationButton = New-AppButton -Text 'Stop Automation'
+$refreshAutomationButton = New-AppButton -Text 'Refresh Status'
+$openAutomationLogButton = New-AppButton -Text 'Open Automation Log'
+@($startAutomationButton, $stopAutomationButton, $refreshAutomationButton, $openAutomationLogButton) |
+    ForEach-Object { $automationButtonPanel.Controls.Add($_) }
+
+$automationLogBox = New-Object System.Windows.Forms.TextBox
+$automationLogBox.Location = New-Object System.Drawing.Point(16, 346)
+$automationLogBox.Size = New-Object System.Drawing.Size(746, 182)
+$automationLogBox.Multiline = $true
+$automationLogBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+$automationLogBox.ReadOnly = $true
+$automationTab.Controls.Add($automationLogBox)
+
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
 $statusText = New-Object System.Windows.Forms.ToolStripStatusLabel
 $statusText.Text = 'Ready'
@@ -429,6 +753,71 @@ function Refresh-WindowList {
     }
 }
 
+function Update-AfkLogPreview {
+    param($Paths)
+
+    if (Test-Path -LiteralPath $Paths.LogPath -PathType Leaf) {
+        $afkLogBox.Text = ((Get-Content -LiteralPath $Paths.LogPath -Tail 80 -Encoding UTF8) -join [Environment]::NewLine)
+    }
+    else {
+        $afkLogBox.Text = 'No AFK log yet.'
+    }
+}
+
+function Refresh-AfkPanel {
+    Invoke-AppSafely -FailureTitle 'AFK Status' -Action {
+        $paths = Get-AppAfkPaths
+        Initialize-AfkWorkspace -Paths $paths
+        $afkConfig = Get-AppAfkConfig
+        $options = Resolve-AfkRuntimeOptions -Config $afkConfig
+        $state = Get-AfkState -Paths $paths
+
+        $afkStatusLabel.Text = "Status: $($state.Status) - Input=$($options.InputMethod), Startup=$($options.StartupDelaySeconds)s Sequence=$($options.EnterDelaySeconds)s/$($options.XDelayMilliseconds)ms/$($options.LoopDelaySeconds)s EnterEvery=$($options.EnterOnlyDelaySeconds)s MacroDelay=$($options.MacroComboCycleDelaySeconds)s"
+        Update-AfkLogPreview -Paths $paths
+        Set-AppStatusText 'AFK status refreshed.'
+    }
+}
+
+function Update-AutomationLogPreview {
+    param($Paths)
+
+    if (Test-Path -LiteralPath $Paths.LogPath -PathType Leaf) {
+        $automationLogBox.Text = ((Get-Content -LiteralPath $Paths.LogPath -Tail 80 -Encoding UTF8) -join [Environment]::NewLine)
+    }
+    else {
+        $automationLogBox.Text = 'No automation log yet.'
+    }
+}
+
+function Set-AutomationLoopDefault {
+    Invoke-AppSafely -FailureTitle 'Automation Mode' -Action {
+        $mode = [string]$automationModeCombo.SelectedItem
+        if ([string]::IsNullOrWhiteSpace($mode)) {
+            $mode = 'AutoBuyCar'
+        }
+
+        $config = Get-AppAutomationConfig
+        $options = Resolve-AutomationRuntimeOptions -Config $config -Mode $mode
+        $value = [Math]::Min([decimal]$automationLoopInput.Maximum, [Math]::Max([decimal]$automationLoopInput.Minimum, [decimal]$options.LoopCount))
+        $automationLoopInput.Value = $value
+    }
+}
+
+function Refresh-AutomationPanel {
+    Invoke-AppSafely -FailureTitle 'Automation Status' -Action {
+        $paths = Get-AppAutomationPaths
+        Initialize-AutomationWorkspace -Paths $paths
+        $config = Get-AppAutomationConfig
+        $autoBuyOptions = Resolve-AutomationRuntimeOptions -Config $config -Mode 'AutoBuyCar'
+        $findOptions = Resolve-AutomationRuntimeOptions -Config $config -Mode 'FindNewSubaru'
+        $state = Get-AutomationState -Paths $paths
+
+        $automationStatusLabel.Text = "Status: $($state.Status) - Input=$($autoBuyOptions.InputMethod), AutoBuy loops=$($autoBuyOptions.LoopCount), Find loops=$($findOptions.LoopCount), Find max attempts=$($findOptions.FindNewSubaruMaxSearchAttempts), search=$($findOptions.FindNewSubaruSearchKey), after select=$($findOptions.FindNewSubaruAfterSelectDelayMilliseconds)ms"
+        Update-AutomationLogPreview -Paths $paths
+        Set-AppStatusText 'Automation status refreshed.'
+    }
+}
+
 $refreshBackupButton.Add_Click({ Refresh-BackupPanel })
 $backupNowButton.Add_Click({
     Invoke-AppSafely -FailureTitle 'Backup Now' -Action {
@@ -504,9 +893,114 @@ $openFocusLogButton.Add_Click({
     }
 })
 
+$refreshAfkButton.Add_Click({ Refresh-AfkPanel })
+$startAfkButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Start AFK' -Action {
+        $mode = [string]$afkModeCombo.SelectedItem
+        if ([string]::IsNullOrWhiteSpace($mode)) {
+            $mode = 'Sequence'
+        }
+        $afkConfig = Get-AppAfkConfig
+        $options = Resolve-AfkRuntimeOptions -Config $afkConfig
+        if ($mode -eq 'EnterEvery10s') {
+            $sequenceText = "Sequence: Enter every $($options.EnterOnlyDelaySeconds) seconds. Input=$($options.InputMethod)."
+        }
+        elseif ($mode -eq 'MacroCombo') {
+            $sequenceText = "Sequence: compressed menu macro. Steps=$(@($options.MacroComboSteps).Count), tap hold=$($options.KeyTapHoldMilliseconds)ms, cycle delay=$($options.MacroComboCycleDelaySeconds)s, input=$($options.InputMethod)."
+        }
+        else {
+            $sequenceText = "Sequence: Enter, wait $($options.EnterDelaySeconds)s, x, wait $($options.XDelayMilliseconds)ms, x, wait $($options.XDelayMilliseconds)ms, Enter, wait $($options.LoopDelaySeconds)s, repeat. Input=$($options.InputMethod)."
+        }
+        $confirmation = [System.Windows.Forms.MessageBox]::Show(
+            "AFK will send keys to the current foreground window.`r`n`r`nAfter clicking OK, switch to the game window within $($options.StartupDelaySeconds) seconds.`r`n`r`nMode: $mode`r`n$sequenceText",
+            'Start AFK',
+            [System.Windows.Forms.MessageBoxButtons]::OKCancel,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+        if ($confirmation -ne [System.Windows.Forms.DialogResult]::OK) {
+            return
+        }
+
+        $message = Start-AppAfk -Mode $mode
+        Set-AppStatusText $message
+        Refresh-AfkPanel
+        Show-AppMessage -Message $message
+    }
+})
+$stopAfkButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Stop AFK' -Action {
+        $message = Stop-AppAfk
+        Set-AppStatusText $message
+        Refresh-AfkPanel
+        Show-AppMessage -Message $message
+    }
+})
+$openAfkLogButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Open AFK Log' -Action {
+        $paths = Get-AppAfkPaths
+        Initialize-AfkWorkspace -Paths $paths
+        Open-AppPath -Path $paths.LogPath -EnsureFile
+    }
+})
+
+$automationModeCombo.Add_SelectedIndexChanged({
+    Set-AutomationLoopDefault
+})
+$refreshAutomationButton.Add_Click({ Refresh-AutomationPanel })
+$startAutomationButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Start Automation' -Action {
+        $mode = [string]$automationModeCombo.SelectedItem
+        if ([string]::IsNullOrWhiteSpace($mode)) {
+            $mode = 'AutoBuyCar'
+        }
+
+        $config = Get-AppAutomationConfig
+        $options = Resolve-AutomationRuntimeOptions -Config $config -Mode $mode -LoopCount ([int]$automationLoopInput.Value)
+        if ($mode -eq 'AutoBuyCar') {
+            $sequenceText = "AutoBuyCar will run $($options.LoopCount) loop(s). Steps=$(@($options.AutoBuyCarSteps).Count), between loops=$($options.AutoBuyCarBetweenLoopsMilliseconds)ms, input=$($options.InputMethod)."
+        }
+        else {
+            $sequenceText = "FindNewSubaru will run $($options.LoopCount) loop(s). Search key=$($options.FindNewSubaruSearchKey), max attempts=$($options.FindNewSubaruMaxSearchAttempts), input=$($options.InputMethod), after-select delay=$($options.FindNewSubaruAfterSelectDelayMilliseconds)ms. OCR confirmation=$($options.FindNewSubaruRequireTargetConfirmation)."
+        }
+
+        $confirmation = [System.Windows.Forms.MessageBox]::Show(
+            "Automation will send keys to the current foreground window.`r`n`r`nAfter clicking OK, switch to the game window within $($options.StartupDelaySeconds) seconds.`r`n`r`nMode: $mode`r`n$sequenceText",
+            'Start Automation',
+            [System.Windows.Forms.MessageBoxButtons]::OKCancel,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+        if ($confirmation -ne [System.Windows.Forms.DialogResult]::OK) {
+            return
+        }
+
+        $message = Start-AppAutomation -Mode $mode -LoopCount ([int]$automationLoopInput.Value)
+        Set-AppStatusText $message
+        Refresh-AutomationPanel
+        Show-AppMessage -Message $message
+    }
+})
+$stopAutomationButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Stop Automation' -Action {
+        $message = Stop-AppAutomation
+        Set-AppStatusText $message
+        Refresh-AutomationPanel
+        Show-AppMessage -Message $message
+    }
+})
+$openAutomationLogButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Open Automation Log' -Action {
+        $paths = Get-AppAutomationPaths
+        Initialize-AutomationWorkspace -Paths $paths
+        Open-AppPath -Path $paths.LogPath -EnsureFile
+    }
+})
+
 $form.Add_Shown({
     Refresh-BackupPanel
     Refresh-FocusPanel
+    Refresh-AfkPanel
+    Refresh-AutomationPanel
+    Set-AutomationLoopDefault
     Refresh-WindowList
 })
 
