@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $PSScriptRoot }
 . (Join-Path $scriptRoot 'scripts\AfkLib.ps1')
 . (Join-Path $scriptRoot 'scripts\AutomationLib.ps1')
+. (Join-Path $scriptRoot 'scripts\UltimateLib.ps1')
 
 $paths = Get-AfkPaths -AppRoot $scriptRoot
 Initialize-AfkWorkspace -Paths $paths
@@ -36,6 +37,14 @@ Initialize-AutomationWorkspace -Paths $automationPaths
 $automationState = Get-AutomationState -Paths $automationPaths
 if ($automationState.Status -in @('Running', 'RunningUnverified')) {
     Write-Error "Automation is already running. Stop Automation before starting AFK. Automation PID=$($automationState.Pid)"
+    exit 1
+}
+
+$ultimatePaths = Get-UltimatePaths -AppRoot $scriptRoot
+Initialize-UltimateWorkspace -Paths $ultimatePaths
+$ultimateState = Get-UltimateState -Paths $ultimatePaths
+if ($ultimateState.Status -in @('Running', 'RunningUnverified')) {
+    Write-Error "Ultimate is already running. Stop Ultimate before starting AFK. Ultimate PID=$($ultimateState.Pid)"
     exit 1
 }
 

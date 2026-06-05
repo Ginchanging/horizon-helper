@@ -99,6 +99,9 @@ function Normalize-AfkKeyName {
         'w' { return 'W' }
         'x' { return 'X' }
         'space' { return 'Space' }
+        'backspace' { return 'Backspace' }
+        'bksp' { return 'Backspace' }
+        'bs' { return 'Backspace' }
         'left' { return 'Left' }
         'right' { return 'Right' }
         'up' { return 'Up' }
@@ -419,13 +422,14 @@ function ConvertTo-AfkSendKeysToken {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('Enter', 'Esc', 'A', 'D', 'S', 'W', 'X', 'Space', 'Left', 'Right', 'Up', 'Down')]
+        [ValidateSet('Enter', 'Esc', 'A', 'D', 'S', 'W', 'X', 'Space', 'Backspace', 'Left', 'Right', 'Up', 'Down')]
         [string]$Key
     )
 
     switch ($Key) {
         'Enter' { return '{ENTER}' }
         'Esc' { return '{ESC}' }
+        'Backspace' { return '{BACKSPACE}' }
         'Space' { return ' ' }
         'Left' { return '{LEFT}' }
         'Right' { return '{RIGHT}' }
@@ -530,7 +534,7 @@ function Send-AfkNamedKeyTap {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('Enter', 'Esc', 'A', 'D', 'S', 'W', 'X', 'Space', 'Left', 'Right', 'Up', 'Down')]
+        [ValidateSet('Enter', 'Esc', 'A', 'D', 'S', 'W', 'X', 'Space', 'Backspace', 'Left', 'Right', 'Up', 'Down')]
         [string]$Key,
         [int]$HoldMilliseconds = 50,
         [ValidateSet('SendInputScanCode', 'SendInputVirtualKey', 'SendKeys')][string]$InputMethod = 'SendInputScanCode',
@@ -546,6 +550,7 @@ function Send-AfkNamedKeyTap {
         'W' { 0x57 }
         'X' { 0x58 }
         'Space' { 0x20 }
+        'Backspace' { 0x08 }
         'Left' { 0x25 }
         'Up' { 0x26 }
         'Right' { 0x27 }
@@ -576,6 +581,42 @@ function Send-AfkNamedKeyTap {
     }
 
     Send-AfkVirtualKeyTap -VirtualKey $virtualKey -HoldMilliseconds $HoldMilliseconds -ExtendedKey:$isExtendedKey -InputMethod $InputMethod -DryRun:$DryRun
+}
+
+function Send-AfkDigitKeyTap {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern('^[0-9]$')]
+        [string]$Digit,
+        [int]$HoldMilliseconds = 50,
+        [ValidateSet('SendInputScanCode', 'SendInputVirtualKey', 'SendKeys')][string]$InputMethod = 'SendInputScanCode',
+        [switch]$DryRun
+    )
+
+    $virtualKey = [int][char]$Digit
+    if ($InputMethod -eq 'SendKeys') {
+        if (-not $DryRun) {
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.SendKeys]::SendWait($Digit)
+            if ($HoldMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $HoldMilliseconds
+            }
+        }
+
+        return [pscustomobject]@{
+            Method      = 'SendKeys'
+            VirtualKey  = $virtualKey
+            ScanCode    = $null
+            ExtendedKey = $false
+            DownResult  = $null
+            UpResult    = $null
+            DryRun      = [bool]$DryRun
+            Token       = $Digit
+        }
+    }
+
+    Send-AfkVirtualKeyTap -VirtualKey $virtualKey -HoldMilliseconds $HoldMilliseconds -InputMethod $InputMethod -DryRun:$DryRun
 }
 
 function Send-AfkKeys {

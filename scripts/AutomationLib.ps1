@@ -119,6 +119,20 @@ function Get-DefaultAutoBuyCarSteps {
     )
 }
 
+function Get-DefaultDeleteCarSteps {
+    @(
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 }
+    )
+}
+
 function ConvertTo-AutomationSteps {
     [CmdletBinding()]
     param(
@@ -169,6 +183,9 @@ function Get-AutomationConfig {
     $autoBuyLoopCount = 1
     $autoBuyBetweenLoopsMilliseconds = 1000
     $autoBuySteps = @(Get-DefaultAutoBuyCarSteps)
+    $deleteCarLoopCount = 1
+    $deleteCarBetweenLoopsMilliseconds = 1000
+    $deleteCarSteps = @(Get-DefaultDeleteCarSteps)
     $findLoopCount = 1
     $findBetweenLoopsMilliseconds = 3000
     $findMaxSearchAttempts = 50
@@ -200,6 +217,15 @@ function Get-AutomationConfig {
                 }
             }
 
+            if ((Test-AutomationConfigProperty -Object $automation -Name 'deleteCar') -and $null -ne $automation.deleteCar) {
+                $deleteCar = $automation.deleteCar
+                $deleteCarLoopCount = Get-AutomationConfigIntValue -Object $deleteCar -Name 'loopCount' -DefaultValue $deleteCarLoopCount
+                $deleteCarBetweenLoopsMilliseconds = Get-AutomationConfigIntValue -Object $deleteCar -Name 'betweenLoopsMilliseconds' -DefaultValue $deleteCarBetweenLoopsMilliseconds
+                if ((Test-AutomationConfigProperty -Object $deleteCar -Name 'steps') -and $null -ne $deleteCar.steps) {
+                    $deleteCarSteps = @(ConvertTo-AutomationSteps -Steps $deleteCar.steps -ConfigName 'automation.deleteCar.steps')
+                }
+            }
+
             if ((Test-AutomationConfigProperty -Object $automation -Name 'findNewSubaru') -and $null -ne $automation.findNewSubaru) {
                 $find = $automation.findNewSubaru
                 $findLoopCount = Get-AutomationConfigIntValue -Object $find -Name 'loopCount' -DefaultValue $findLoopCount
@@ -222,6 +248,7 @@ function Get-AutomationConfig {
         @{ Name = 'automation.startupDelaySeconds'; Value = $startupDelaySeconds },
         @{ Name = 'automation.keyTapHoldMilliseconds'; Value = $keyTapHoldMilliseconds },
         @{ Name = 'automation.autoBuyCar.betweenLoopsMilliseconds'; Value = $autoBuyBetweenLoopsMilliseconds },
+        @{ Name = 'automation.deleteCar.betweenLoopsMilliseconds'; Value = $deleteCarBetweenLoopsMilliseconds },
         @{ Name = 'automation.findNewSubaru.betweenLoopsMilliseconds'; Value = $findBetweenLoopsMilliseconds },
         @{ Name = 'automation.findNewSubaru.searchSettleMilliseconds'; Value = $findSearchSettleMilliseconds },
         @{ Name = 'automation.findNewSubaru.afterSelectDelayMilliseconds'; Value = $findAfterSelectDelayMilliseconds },
@@ -234,6 +261,7 @@ function Get-AutomationConfig {
     }
 
     if ($autoBuyLoopCount -lt 1) { throw "Config value 'automation.autoBuyCar.loopCount' must be at least 1." }
+    if ($deleteCarLoopCount -lt 1) { throw "Config value 'automation.deleteCar.loopCount' must be at least 1." }
     if ($findLoopCount -lt 1) { throw "Config value 'automation.findNewSubaru.loopCount' must be at least 1." }
     if ($findMaxSearchAttempts -lt 1) { throw "Config value 'automation.findNewSubaru.maxSearchAttempts' must be at least 1." }
     if ($findTargetKeywords.Count -lt 1) { throw "Config value 'automation.findNewSubaru.targetKeywords' must contain at least one item." }
@@ -249,6 +277,9 @@ function Get-AutomationConfig {
         AutoBuyCarLoopCount              = $autoBuyLoopCount
         AutoBuyCarSteps                  = @($autoBuySteps)
         AutoBuyCarBetweenLoopsMilliseconds = $autoBuyBetweenLoopsMilliseconds
+        DeleteCarLoopCount               = $deleteCarLoopCount
+        DeleteCarSteps                   = @($deleteCarSteps)
+        DeleteCarBetweenLoopsMilliseconds = $deleteCarBetweenLoopsMilliseconds
         FindNewSubaruLoopCount           = $findLoopCount
         FindNewSubaruBetweenLoopsMilliseconds = $findBetweenLoopsMilliseconds
         FindNewSubaruMaxSearchAttempts   = $findMaxSearchAttempts
@@ -266,7 +297,7 @@ function Resolve-AutomationRuntimeOptions {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [ValidateSet('AutoBuyCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
+        [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
         [int]$LoopCount = -1,
         [int]$StartupDelaySeconds = -1
     )
@@ -276,6 +307,9 @@ function Resolve-AutomationRuntimeOptions {
     }
     elseif ($Mode -eq 'FindNewSubaru') {
         $Config.FindNewSubaruLoopCount
+    }
+    elseif ($Mode -eq 'DeleteCar') {
+        $Config.DeleteCarLoopCount
     }
     else {
         $Config.AutoBuyCarLoopCount
@@ -294,6 +328,8 @@ function Resolve-AutomationRuntimeOptions {
         InputMethod                  = $Config.InputMethod
         AutoBuyCarSteps              = @($Config.AutoBuyCarSteps)
         AutoBuyCarBetweenLoopsMilliseconds = $Config.AutoBuyCarBetweenLoopsMilliseconds
+        DeleteCarSteps              = @($Config.DeleteCarSteps)
+        DeleteCarBetweenLoopsMilliseconds = $Config.DeleteCarBetweenLoopsMilliseconds
         FindNewSubaruBetweenLoopsMilliseconds = $Config.FindNewSubaruBetweenLoopsMilliseconds
         FindNewSubaruMaxSearchAttempts = $Config.FindNewSubaruMaxSearchAttempts
         FindNewSubaruSearchKey       = $Config.FindNewSubaruSearchKey

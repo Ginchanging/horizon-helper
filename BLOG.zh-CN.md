@@ -18,6 +18,7 @@ C:\XboxGames\GameSave\pgs
 - 窗口焦点锁定：可以选择一个 Windows 窗口，并尝试让它持续保持焦点。
 - 游戏挂机：可以选择按键循环模式，按脚本逻辑发送 `Enter` 和 `x`，每 10 秒按一次 `Enter`，或执行一套菜单宏。
 - 车辆自动化：提供 `AutoBuyCar` 和 `FindNewSubaru` 两个独立自动化流程，可配置循环次数。
+- Ultimate 终极流程：输入分享代码，OCR 查找 `1998 斯巴鲁 S1 790`，选中后执行 80 轮独立 Sequence。
 - 无额外依赖：基于 Windows 自带的 PowerShell 5.1，不需要 Python、Node.js 或 .NET SDK。
 
 ## 适合谁使用
@@ -30,7 +31,7 @@ C:\XboxGames\GameSave\pgs
 - 想把备份工具放在 U 盘、移动硬盘或固定工具目录中便携使用。
 - 需要一个简单的窗口焦点锁定辅助功能。
 - 需要一个简单的游戏挂机按键循环。
-- 需要重复执行买车或筛选“全新 1998 斯巴鲁”这类菜单操作。
+- 需要重复执行买车、筛选“全新 1998 斯巴鲁”，或执行分享代码选车后的长循环操作。
 
 它不是云同步工具，也不是存档修改器。它只负责读取指定目录，并把内容复制、压缩成 zip 备份。
 
@@ -39,7 +40,7 @@ C:\XboxGames\GameSave\pgs
 从 GitHub Release 下载类似下面的文件：
 
 ```text
-gamesave-guardian-v1.4.0.zip
+gamesave-guardian-v1.5.0.zip
 ```
 
 解压后，双击：
@@ -48,12 +49,13 @@ gamesave-guardian-v1.4.0.zip
 GameSaveGuardian.cmd
 ```
 
-打开后会看到四个主要页面：
+打开后会看到五个主要页面：
 
 - `Backup`：管理存档备份。
 - `Focus Lock`：管理窗口焦点锁定。
 - `AFK`：管理游戏挂机按键循环。
 - `Automation`：管理车辆自动化流程。
+- `Ultimate`：管理终极分享代码和 OCR 选车流程。
 
 推荐普通用户只使用图形界面。项目里仍然保留了多个 `.cmd` / `.ps1` 脚本入口，主要是给高级用户或排查问题时使用。
 
@@ -189,6 +191,10 @@ config.json
 - `automation.findNewSubaru.maxSearchAttempts`：每轮最多搜索次数。
 - `automation.findNewSubaru.afterSelectDelayMilliseconds`：命中并按 `Enter` 选择车辆后，等待多少毫秒再执行 `MacroCombo`。
 - `automation.findNewSubaru.targetKeywords`：OCR 确认车型时必须匹配的关键词。
+- `ultimate.shareCode`：Ultimate 输入的分享代码，默认 `705399298`。
+- `ultimate.targetKeywords`：Ultimate OCR 严格匹配关键词，默认 `1998`、`斯巴鲁`、`S1`、`790`。
+- `ultimate.sequenceLoopCount`：Ultimate 最后执行多少轮独立 `Sequence`，默认 `80`。
+- `ultimate.sequence.*`：Ultimate 独立 `Sequence` 的等待时间，不读取 AFK 配置。
 
 如果你修改了配置，并且自动备份已经启动，请先停止自动备份，再重新启动，让新配置生效。
 
@@ -290,6 +296,22 @@ Enter
 
 注意：自动化和 AFK 不能同时运行，避免两个后台任务同时发送按键。
 
+## Ultimate 终极流程
+
+`Ultimate` 是独立模块，不属于备份、焦点锁定、AFK 或 Automation。
+
+它会先执行固定菜单宏，输入分享代码 `705399298`，然后用截图和 Windows OCR 查找当前高亮车辆卡是否严格匹配 `1998`、`斯巴鲁`、`S1`、`790`。命中后按 `Enter`，等待配置里的时间，再执行独立的 80 轮 `Sequence`。
+
+使用方式：
+
+1. 打开 `GameSaveGuardian.cmd`。
+2. 切换到 `Ultimate` 页面。
+3. 点击 `Start Ultimate`。
+4. 在提示后的倒计时内切回游戏窗口。
+5. 不需要时点击 `Stop Ultimate`。
+
+Ultimate 和 AFK、Automation 不能同时运行。Focus Lock 不会被强制禁止，但可能影响窗口焦点。
+
 ## 高级脚本入口
 
 如果不想打开 GUI，也可以直接使用这些脚本：
@@ -328,10 +350,12 @@ runtime\
 - `logs\backup.log`：存档备份日志。
 - `logs\afk.log`：挂机日志。
 - `logs\automation.log`：车辆自动化日志。
+- `logs\ultimate.log`：Ultimate 终极流程日志。
 - `logs\focus-lock.log`：焦点锁定日志。
 - `runtime\watcher.pid`：自动备份后台进程状态。
 - `runtime\afk.pid`：挂机后台进程状态。
 - `runtime\automation.pid`：车辆自动化后台进程状态。
+- `runtime\ultimate.pid`：Ultimate 后台进程状态。
 - `runtime\focus-lock.pid`：焦点锁定后台进程状态。
 
 如果遇到问题，优先查看 `logs` 目录里的日志。
@@ -362,11 +386,15 @@ runtime\
 
    启动 `AutoBuyCar` 或 `FindNewSubaru` 前，请确认游戏已经停在对应菜单。`FindNewSubaru` 使用截图、像素检测和 Windows OCR，实际效果会受窗口缩放、语言、亮度和界面遮挡影响。
 
-7. Release 包和源码仓库应该分开管理。
+7. Ultimate 会执行较长流程。
+
+   启动前请确认游戏处在预期菜单路径，并且前台窗口是游戏窗口。OCR 目标严格要求 `1998`、`斯巴鲁`、`S1`、`790`，识别不到会停止并写入日志。
+
+8. Release 包和源码仓库应该分开管理。
 
    源码仓库不建议提交 `backups`、`logs`、`runtime`、`dist` 或 zip 包。用户下载包应该放在 GitHub Release。
 
-8. 第一次运行时可能遇到 Windows 安全提示。
+9. 第一次运行时可能遇到 Windows 安全提示。
 
    这是未签名脚本或压缩包常见情况。公开发布时，如果希望进一步减少提示，需要代码签名或正式安装包流程。
 

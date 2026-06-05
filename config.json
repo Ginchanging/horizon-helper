@@ -84,6 +84,49 @@
       "newBadgeText": "全新",
       "requireTargetConfirmation": true,
       "verticalScanSteps": 2
+    },
+    "deleteCar": {
+      "loopCount": 1,
+      "betweenLoopsMilliseconds": 1000,
+      "steps": [
+        { "key": "Enter", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "S", "waitMilliseconds": 500 }
+      ]
     }
+  },
+  "ultimate": {
+    "startupDelaySeconds": 5,
+    "inputMethod": "SendKeys",
+    "keyTapHoldMilliseconds": 50,
+    "shareCode": "705399298",
+    "digitIntervalMilliseconds": 500,
+    "afterTargetSelectDelayMilliseconds": 20000,
+    "afterTargetConfirmDelayMilliseconds": 2000,
+    "sequenceLoopCount": 1,
+    "sequence": {
+      "enterDelaySeconds": 40,
+      "xDelayMilliseconds": 500,
+      "loopDelaySeconds": 10
+    },
+    "targetKeywords": [
+      "1998",
+      "斯巴",
+      "S1",
+      "790"
+    ],
+    "familyKeywords": [
+      "斯巴"
+    ],
+    "searchKey": "Left",
+    "searchSettleMilliseconds": 500,
+    "maxSearchAttempts": 0,
+    "verticalScanSteps": 2
   }
 }

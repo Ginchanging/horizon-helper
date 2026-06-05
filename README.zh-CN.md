@@ -1,6 +1,6 @@
 # GameSave Guardian 游戏存档工具
 
-GameSave Guardian 是一个便携式 Windows 小工具，用来自动备份 Xbox 游戏存档，也可以提供窗口焦点恢复、游戏挂机按键循环和车辆自动化流程。
+GameSave Guardian 是一个便携式 Windows 小工具，用来自动备份 Xbox 游戏存档，也可以提供窗口焦点恢复、游戏挂机按键循环、车辆自动化流程和独立的 Ultimate 终极流程。
 
 默认备份源是 `C:\XboxGames\GameSave\pgs`。备份文件会写入程序当前所在文件夹的 `backups` 目录，所以你把整个工具文件夹移动到哪里，备份目录也会跟着移动。
 
@@ -11,7 +11,8 @@ GameSave Guardian 是一个便携式 Windows 小工具，用来自动备份 Xbox
 3. 在 `Backup` 页里启动自动备份、停止自动备份，或立即备份一次。
 4. 在 `Focus Lock` 页里刷新窗口列表，选择窗口，然后启动焦点锁定。
 5. 在 `AFK` 页里选择模式，并启动或停止挂机按键循环。
-6. 在 `Automation` 页里启动 `AutoBuyCar` 或 `FindNewSubaru` 车辆自动化。
+6. 在 `Automation` 页里启动 `AutoBuyCar`、`DeleteCar` 或 `FindNewSubaru` 车辆自动化。
+7. 在 `Ultimate` 页里启动分享代码、OCR 选车和 80 轮 Sequence 的终极流程。
 
 只需要 Windows 自带的 Windows PowerShell 5.1，不需要安装 Python、Node.js、.NET SDK 或安装包。
 
@@ -53,10 +54,18 @@ AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inpu
 车辆自动化：
 
 - `AutoBuyCar`：按配置循环执行买车按键。默认一轮是 `Space`、等待 1 秒、`Down`、等待 0.5 秒、`Enter`、等待 1 秒、`Enter`、等待 1 秒、`Enter`，两轮之间等待 1 秒。
+- `DeleteCar`：与 AFK 类似的纯按键序列，可设置循环轮数。默认一轮是 `Enter`、等待 0.5 秒、`S` × 4（每次等待 0.5 秒）、`Enter`、等待 0.5 秒、`S`、等待 0.5 秒、`Enter`、等待 1 秒、`S`、等待 0.5 秒，两轮之间等待 1 秒。按键步骤和等待时间都可在 `config.json` 的 `automation.deleteCar` 里修改。
 - `FindNewSubaru`：倒计时后锁定当前前台窗口，逐次按 `Left` 搜索；只检查当前绿色边框高亮车辆卡，检测黄色 `全新` 标签，并用 Windows OCR 确认文字包含 `1998` 和 `斯巴鲁`。命中后按 `Enter`，等待 2 秒，再执行一次 AFK 的 `MacroCombo`。
 - 自动化和 AFK 不能同时运行，避免两个后台任务同时发送按键。
 
 注意：如果检测到 `全新` 但 OCR 不是目标车型，工具会写入日志并继续搜索，直到命中或达到最大搜索次数。车型确认支持完整匹配 `1998` + `斯巴鲁`，也兼容 OCR 识别成 `1998`、`斯`、`巴` 这类模糊文本。
+
+Ultimate 终极流程：
+
+- 先执行固定菜单宏，输入分享代码 `705399298`。
+- 使用 Windows OCR 查找同时匹配 `1998`、`斯巴`、`S1`、`790` 的车辆卡（目标就是 1998 斯巴鲁 S1 790；这里用 `斯巴` 而不是 `斯巴鲁`，因为 OCR 经常把 `鲁` 误读成 `兽`、`口`，而 `斯`、`巴` 识别稳定）。
+- 命中后按 `Enter`，等待配置时间，再执行独立的 80 轮 `Sequence`。
+- Ultimate 和 AFK、Automation 不能同时运行。
 
 ## 高级脚本入口
 
@@ -69,9 +78,12 @@ AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inpu
 - `StartAfk.cmd`：启动挂机按键循环，可用 `-Mode EnterEvery10s` 启动每 10 秒按 Enter 的模式，或用 `-Mode MacroCombo` 启动菜单宏模式。
 - `StopAfk.cmd`：停止挂机，并额外释放一次 `W` 作为兜底。
 - `StatusAfk.cmd`：查看挂机状态。
-- `StartAutomation.cmd`：启动车辆自动化。示例：`.\StartAutomation.ps1 -Mode AutoBuyCar -LoopCount 3` 或 `.\StartAutomation.ps1 -Mode FindNewSubaru -LoopCount 1`。
+- `StartAutomation.cmd`：启动车辆自动化。示例：`.\StartAutomation.ps1 -Mode AutoBuyCar -LoopCount 3`、`.\StartAutomation.ps1 -Mode DeleteCar -LoopCount 5` 或 `.\StartAutomation.ps1 -Mode FindNewSubaru -LoopCount 1`。
 - `StopAutomation.cmd`：停止当前车辆自动化。
 - `StatusAutomation.cmd`：查看车辆自动化状态。
+- `StartUltimate.cmd`：启动 Ultimate 终极流程。
+- `StopUltimate.cmd`：停止 Ultimate，并额外释放一次 `W` 作为兜底。
+- `StatusUltimate.cmd`：查看 Ultimate 状态和配置。
 - `StartFocusLock.cmd`：选择一个 Windows 窗口，并让它持续保持焦点。
 - `StopFocusLock.cmd`：停止窗口焦点锁定。
 - `StatusFocusLock.cmd`：查看窗口焦点锁定状态。
@@ -122,6 +134,21 @@ AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inpu
         { "key": "Enter", "waitMilliseconds": 0 }
       ]
     },
+    "deleteCar": {
+      "loopCount": 1,
+      "betweenLoopsMilliseconds": 1000,
+      "steps": [
+        { "key": "Enter", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 500 },
+        { "key": "S", "waitMilliseconds": 500 },
+        { "key": "Enter", "waitMilliseconds": 1000 },
+        { "key": "S", "waitMilliseconds": 500 }
+      ]
+    },
     "findNewSubaru": {
       "loopCount": 1,
       "maxSearchAttempts": 50,
@@ -155,6 +182,9 @@ AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inpu
 - `automation.autoBuyCar.loopCount`：`AutoBuyCar` 默认循环次数。
 - `automation.autoBuyCar.steps`：`AutoBuyCar` 每轮按键和等待时间。
 - `automation.autoBuyCar.betweenLoopsMilliseconds`：`AutoBuyCar` 两轮之间等待多少毫秒。
+- `automation.deleteCar.loopCount`：`DeleteCar` 默认循环次数。
+- `automation.deleteCar.steps`：`DeleteCar` 每轮按键和等待时间，每一项的 `key` 是按键，`waitMilliseconds` 是这次按键后等待多少毫秒。
+- `automation.deleteCar.betweenLoopsMilliseconds`：`DeleteCar` 两轮之间等待多少毫秒。
 - `automation.findNewSubaru.loopCount`：`FindNewSubaru` 默认处理几轮。
 - `automation.findNewSubaru.maxSearchAttempts`：每轮最多按多少次搜索键。
 - `automation.findNewSubaru.searchKey`：搜索时发送的方向键，默认 `Left`。
@@ -162,6 +192,11 @@ AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inpu
 - `automation.findNewSubaru.afterSelectDelayMilliseconds`：命中并按 `Enter` 选择车辆后，等待多少毫秒再执行 `MacroCombo`。
 - `automation.findNewSubaru.targetKeywords`：OCR 必须识别到的目标关键词。
 - `automation.findNewSubaru.requireTargetConfirmation`：为 `true` 时，会用 OCR 确认目标车型；不匹配时继续搜索。
+- `ultimate.shareCode`：Ultimate 输入的分享代码，默认 `705399298`。
+- `ultimate.targetKeywords`：Ultimate OCR 匹配关键词，默认 `1998`、`斯巴`、`S1`、`790`。用 `斯巴` 而不是完整的 `斯巴鲁`，是为了避免 OCR 把 `鲁` 误读成 `兽`、`口` 导致漏掉目标车；`1998 + S1 + 790` 已经足以唯一锁定目标。
+- `ultimate.familyKeywords`：判断当前卡是不是斯巴鲁车系的关键词，默认 `斯巴`。命中车系才会上下扫描该列寻找精确目标。
+- `ultimate.sequenceLoopCount`：Ultimate 最后执行多少轮独立 `Sequence`，默认 `80`。
+- `ultimate.sequence.*`：Ultimate 独立 `Sequence` 的等待时间，不读取 AFK 配置。
 
 修改配置后，如果自动备份已经启动，请先停止再重新启动，让新配置生效。
 
@@ -170,10 +205,12 @@ AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inpu
 - 备份日志：`logs\backup.log`
 - 挂机日志：`logs\afk.log`
 - 车辆自动化日志：`logs\automation.log`
+- Ultimate 日志：`logs\ultimate.log`
 - 焦点锁定日志：`logs\focus-lock.log`
 - 自动备份 PID：`runtime\watcher.pid`
 - 挂机 PID：`runtime\afk.pid`
 - 车辆自动化 PID：`runtime\automation.pid`
+- Ultimate PID：`runtime\ultimate.pid`
 - 焦点锁定 PID：`runtime\focus-lock.pid`
 - 当前焦点锁定目标：`runtime\focus-lock.target.json`
 
@@ -184,13 +221,13 @@ AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inpu
 生成便携 release zip：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\BuildRelease.ps1 -Version 1.4.0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\BuildRelease.ps1 -Version 1.5.0
 ```
 
 输出文件：
 
 ```text
-dist\gamesave-guardian-v1.4.0.zip
+dist\gamesave-guardian-v1.5.0.zip
 ```
 
 zip 会包含图形界面、脚本、配置和说明文档，不会包含 `.git`、`backups`、`logs`、`runtime`、旧版 zip 等运行产物。

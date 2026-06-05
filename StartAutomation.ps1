@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('AutoBuyCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
+    [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
     [int]$LoopCount = -1,
     [int]$StartupDelaySeconds = -1,
     [string]$RecognitionImagePath,
@@ -11,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $PSScriptRoot }
 . (Join-Path $scriptRoot 'scripts\AfkLib.ps1')
 . (Join-Path $scriptRoot 'scripts\AutomationLib.ps1')
+. (Join-Path $scriptRoot 'scripts\UltimateLib.ps1')
 
 $paths = Get-AutomationPaths -AppRoot $scriptRoot
 Initialize-AutomationWorkspace -Paths $paths
@@ -29,6 +30,14 @@ Initialize-AfkWorkspace -Paths $afkPaths
 $afkState = Get-AfkState -Paths $afkPaths
 if ($afkState.Status -in @('Running', 'RunningUnverified')) {
     Write-Error "AFK is already running. Stop AFK before starting Automation. AFK PID=$($afkState.Pid)"
+    exit 1
+}
+
+$ultimatePaths = Get-UltimatePaths -AppRoot $scriptRoot
+Initialize-UltimateWorkspace -Paths $ultimatePaths
+$ultimateState = Get-UltimateState -Paths $ultimatePaths
+if ($ultimateState.Status -in @('Running', 'RunningUnverified')) {
+    Write-Error "Ultimate is already running. Stop Ultimate before starting Automation. Ultimate PID=$($ultimateState.Pid)"
     exit 1
 }
 
@@ -69,6 +78,10 @@ Write-Host "Input method: $($options.InputMethod)"
     if ($Mode -eq 'AutoBuyCar') {
         Write-Host "AutoBuyCar steps: $(@($options.AutoBuyCarSteps).Count)"
         Write-Host "Between loops: $($options.AutoBuyCarBetweenLoopsMilliseconds) ms"
+    }
+    elseif ($Mode -eq 'DeleteCar') {
+        Write-Host "DeleteCar steps: $(@($options.DeleteCarSteps).Count)"
+        Write-Host "Between loops: $($options.DeleteCarBetweenLoopsMilliseconds) ms"
     }
     else {
         Write-Host "FindNewSubaru max attempts: $($options.FindNewSubaruMaxSearchAttempts)"

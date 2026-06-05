@@ -58,6 +58,12 @@ $rootFiles = @(
     'StopAutomation.ps1',
     'StatusAutomation.cmd',
     'StatusAutomation.ps1',
+    'StartUltimate.cmd',
+    'StartUltimate.ps1',
+    'StopUltimate.cmd',
+    'StopUltimate.ps1',
+    'StatusUltimate.cmd',
+    'StatusUltimate.ps1',
     'StartFocusLock.cmd',
     'StartFocusLock.ps1',
     'StopFocusLock.cmd',
@@ -78,6 +84,8 @@ $scriptFiles = @(
     'KeepWindowFocused.ps1',
     'RunAfk.ps1',
     'RunAutomation.ps1',
+    'RunUltimate.ps1',
+    'UltimateLib.ps1',
     'WatchBackup.ps1'
 )
 

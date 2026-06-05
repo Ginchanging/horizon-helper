@@ -10,6 +10,7 @@ $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Par
 . (Join-Path $scriptRoot 'scripts\FocusLib.ps1')
 . (Join-Path $scriptRoot 'scripts\AfkLib.ps1')
 . (Join-Path $scriptRoot 'scripts\AutomationLib.ps1')
+. (Join-Path $scriptRoot 'scripts\UltimateLib.ps1')
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -39,6 +40,14 @@ function Get-AppAutomationPaths {
 
 function Get-AppAutomationConfig {
     Get-AutomationConfig -AppRoot $scriptRoot
+}
+
+function Get-AppUltimatePaths {
+    Get-UltimatePaths -AppRoot $scriptRoot
+}
+
+function Get-AppUltimateConfig {
+    Get-UltimateConfig -AppRoot $scriptRoot
 }
 
 function Show-AppMessage {
@@ -226,6 +235,13 @@ function Start-AppAfk {
         throw "Automation is already running. Stop Automation before starting AFK. Automation PID=$($automationState.Pid)"
     }
 
+    $ultimatePaths = Get-AppUltimatePaths
+    Initialize-UltimateWorkspace -Paths $ultimatePaths
+    $ultimateState = Get-UltimateState -Paths $ultimatePaths
+    if ($ultimateState.Status -in @('Running', 'RunningUnverified')) {
+        throw "Ultimate is already running. Stop Ultimate before starting AFK. Ultimate PID=$($ultimateState.Pid)"
+    }
+
     $state = Get-AfkState -Paths $paths
     if ($state.Status -in @('Running', 'RunningUnverified')) {
         return $state.Message
@@ -294,7 +310,7 @@ function Stop-AppAfk {
 
 function Start-AppAutomation {
     param(
-        [ValidateSet('AutoBuyCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
+        [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
         [int]$LoopCount = -1
     )
 
@@ -308,6 +324,13 @@ function Start-AppAutomation {
     $afkState = Get-AfkState -Paths $afkPaths
     if ($afkState.Status -in @('Running', 'RunningUnverified')) {
         throw "AFK is already running. Stop AFK before starting Automation. AFK PID=$($afkState.Pid)"
+    }
+
+    $ultimatePaths = Get-AppUltimatePaths
+    Initialize-UltimateWorkspace -Paths $ultimatePaths
+    $ultimateState = Get-UltimateState -Paths $ultimatePaths
+    if ($ultimateState.Status -in @('Running', 'RunningUnverified')) {
+        throw "Ultimate is already running. Stop Ultimate before starting Automation. Ultimate PID=$($ultimateState.Pid)"
     }
 
     $state = Get-AutomationState -Paths $paths
@@ -370,6 +393,91 @@ function Stop-AppAutomation {
     return $state.Message
 }
 
+function Start-AppUltimate {
+    param(
+        [int]$SequenceLoopCount = -1,
+        [int]$AutoBuyCarLoopCount = -1
+    )
+
+    $paths = Get-AppUltimatePaths
+    Initialize-UltimateWorkspace -Paths $paths
+    $config = Get-AppUltimateConfig
+    $options = Resolve-UltimateRuntimeOptions -Config $config -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount
+
+    $afkPaths = Get-AppAfkPaths
+    Initialize-AfkWorkspace -Paths $afkPaths
+    $afkState = Get-AfkState -Paths $afkPaths
+    if ($afkState.Status -in @('Running', 'RunningUnverified')) {
+        throw "AFK is already running. Stop AFK before starting Ultimate. AFK PID=$($afkState.Pid)"
+    }
+
+    $automationPaths = Get-AppAutomationPaths
+    Initialize-AutomationWorkspace -Paths $automationPaths
+    $automationState = Get-AutomationState -Paths $automationPaths
+    if ($automationState.Status -in @('Running', 'RunningUnverified')) {
+        throw "Automation is already running. Stop Automation before starting Ultimate. Automation PID=$($automationState.Pid)"
+    }
+
+    $state = Get-UltimateState -Paths $paths
+    if ($state.Status -in @('Running', 'RunningUnverified')) {
+        return $state.Message
+    }
+
+    Remove-StaleUltimatePid -Paths $paths -State $state
+
+    $workerScript = Join-Path $scriptRoot 'scripts\RunUltimate.ps1'
+    $argumentList = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-STA',
+        '-File', ('"{0}"' -f $workerScript),
+        '-AppRoot', ('"{0}"' -f $scriptRoot),
+        '-StartupDelaySeconds', ([string]$options.StartupDelaySeconds),
+        '-SequenceLoopCount', ([string]$options.SequenceLoopCount),
+        '-AutoBuyCarLoopCount', ([string]$options.AutoBuyCarLoopCount)
+    )
+
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -WindowStyle Hidden -PassThru
+    $newState = $null
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        Start-Sleep -Milliseconds 300
+        $newState = Get-UltimateState -Paths $paths
+        if ($newState.Status -in @('Running', 'RunningUnverified') -or $process.HasExited) {
+            break
+        }
+    }
+
+    if ($newState -and $newState.Status -in @('Running', 'RunningUnverified')) {
+        return "Ultimate started. PID=$($newState.Pid). SequenceLoops=$($options.SequenceLoopCount). InputMethod=$($options.InputMethod). Switch to the game window within $($options.StartupDelaySeconds) seconds."
+    }
+
+    if ($process.HasExited) {
+        throw "Ultimate exited early. Check log: $($paths.LogPath)"
+    }
+
+    return "Ultimate process started. PID=$($process.Id)"
+}
+
+function Stop-AppUltimate {
+    $paths = Get-AppUltimatePaths
+    Initialize-UltimateWorkspace -Paths $paths
+    $state = Get-UltimateState -Paths $paths
+
+    if ($state.Status -in @('Running', 'RunningUnverified')) {
+        Release-AfkKeys
+        Stop-Process -Id $state.Pid -Force -ErrorAction Stop
+        Start-Sleep -Milliseconds 300
+        Release-AfkKeys
+        Remove-UltimatePid -Paths $paths
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate stopped by GUI. PID=$($state.Pid)"
+        return "Ultimate stopped. PID=$($state.Pid)"
+    }
+
+    Release-AfkKeys
+    Remove-StaleUltimatePid -Paths $paths -State $state
+    return $state.Message
+}
+
 if ($SelfTest) {
     $config = Get-AppBackupConfig
     Initialize-BackupWorkspace -Config $config
@@ -386,8 +494,14 @@ if ($SelfTest) {
     Initialize-AutomationWorkspace -Paths $automationPaths
     $automationConfig = Get-AppAutomationConfig
     $autoBuyOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'AutoBuyCar'
+    $deleteCarOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'DeleteCar'
     $findOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'FindNewSubaru'
     $automationState = Get-AutomationState -Paths $automationPaths
+    $ultimatePaths = Get-AppUltimatePaths
+    Initialize-UltimateWorkspace -Paths $ultimatePaths
+    $ultimateConfig = Get-AppUltimateConfig
+    $ultimateOptions = Resolve-UltimateRuntimeOptions -Config $ultimateConfig
+    $ultimateState = Get-UltimateState -Paths $ultimatePaths
     $windowCount = @(Get-FocusWindowList).Count
 
     Write-Host 'GameSave Guardian self-test passed.'
@@ -402,8 +516,14 @@ if ($SelfTest) {
     Write-Host "Automation status: $($automationState.Status)"
     Write-Host "AutoBuyCar loop count: $($autoBuyOptions.LoopCount)"
     Write-Host "Automation input method: $($autoBuyOptions.InputMethod)"
+    Write-Host "DeleteCar loop count: $($deleteCarOptions.LoopCount)"
+    Write-Host "DeleteCar steps: $(@($deleteCarOptions.DeleteCarSteps).Count)"
     Write-Host "FindNewSubaru max attempts: $($findOptions.FindNewSubaruMaxSearchAttempts)"
     Write-Host "FindNewSubaru after-select delay: $($findOptions.FindNewSubaruAfterSelectDelayMilliseconds) ms"
+    Write-Host "Ultimate status: $($ultimateState.Status)"
+    Write-Host "Ultimate share code: $($ultimateOptions.ShareCode)"
+    Write-Host "Ultimate sequence loops: $($ultimateOptions.SequenceLoopCount)"
+    Write-Host "Ultimate target keywords: $($ultimateOptions.TargetKeywords -join ', ')"
     Write-Host "Visible windows: $windowCount"
     exit 0
 }
@@ -434,6 +554,10 @@ $tabs.TabPages.Add($afkTab)
 $automationTab = New-Object System.Windows.Forms.TabPage
 $automationTab.Text = 'Automation'
 $tabs.TabPages.Add($automationTab)
+
+$ultimateTab = New-Object System.Windows.Forms.TabPage
+$ultimateTab.Text = 'Ultimate'
+$tabs.TabPages.Add($ultimateTab)
 
 $backupStatusLabel = New-Object System.Windows.Forms.Label
 $backupStatusLabel.Location = New-Object System.Drawing.Point(16, 16)
@@ -623,6 +747,7 @@ $automationModeCombo.Location = New-Object System.Drawing.Point(132, 48)
 $automationModeCombo.Size = New-Object System.Drawing.Size(220, 24)
 $automationModeCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 [void]$automationModeCombo.Items.Add('AutoBuyCar')
+[void]$automationModeCombo.Items.Add('DeleteCar')
 [void]$automationModeCombo.Items.Add('FindNewSubaru')
 $automationModeCombo.SelectedIndex = 0
 $automationTab.Controls.Add($automationModeCombo)
@@ -646,7 +771,7 @@ $automationInfoBox.Location = New-Object System.Drawing.Point(16, 86)
 $automationInfoBox.Size = New-Object System.Drawing.Size(746, 134)
 $automationInfoBox.Multiline = $true
 $automationInfoBox.ReadOnly = $true
-$automationInfoBox.Text = "Automation sends keys to the current foreground game window after a countdown.`r`nDefault input method is SendKeys, matching the original simple AFK script more closely. You can change automation.inputMethod in config.json.`r`nAutoBuyCar repeats: Space, Down, Enter, Enter, Enter with configured waits.`r`nFindNewSubaru searches left until it finds a new 1998 Subaru, selects it, waits for the configured delay, then runs AFK MacroCombo."
+$automationInfoBox.Text = "Automation sends keys to the current foreground game window after a countdown.`r`nDefault input method is SendKeys, matching the original simple AFK script more closely. You can change automation.inputMethod in config.json.`r`nAutoBuyCar repeats: Space, Down, Enter, Enter, Enter with configured waits.`r`nDeleteCar repeats the configured Enter/S menu sequence for the chosen loop count.`r`nFindNewSubaru searches left until it finds a new 1998 Subaru, selects it, waits for the configured delay, then runs AFK MacroCombo."
 $automationTab.Controls.Add($automationInfoBox)
 
 $automationButtonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -670,6 +795,70 @@ $automationLogBox.Multiline = $true
 $automationLogBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
 $automationLogBox.ReadOnly = $true
 $automationTab.Controls.Add($automationLogBox)
+
+$ultimateStatusLabel = New-Object System.Windows.Forms.Label
+$ultimateStatusLabel.Location = New-Object System.Drawing.Point(16, 16)
+$ultimateStatusLabel.Size = New-Object System.Drawing.Size(760, 22)
+$ultimateStatusLabel.Text = 'Status: loading...'
+$ultimateTab.Controls.Add($ultimateStatusLabel)
+
+$ultimateLoopLabel = New-Object System.Windows.Forms.Label
+$ultimateLoopLabel.Location = New-Object System.Drawing.Point(16, 46)
+$ultimateLoopLabel.Size = New-Object System.Drawing.Size(100, 24)
+$ultimateLoopLabel.Text = 'Sequence loops'
+$ultimateTab.Controls.Add($ultimateLoopLabel)
+
+$ultimateLoopInput = New-Object System.Windows.Forms.NumericUpDown
+$ultimateLoopInput.Location = New-Object System.Drawing.Point(120, 44)
+$ultimateLoopInput.Size = New-Object System.Drawing.Size(72, 24)
+$ultimateLoopInput.Minimum = 1
+$ultimateLoopInput.Maximum = 9999
+$ultimateLoopInput.Value = 80
+$ultimateTab.Controls.Add($ultimateLoopInput)
+
+$ultimateAutoBuyLabel = New-Object System.Windows.Forms.Label
+$ultimateAutoBuyLabel.Location = New-Object System.Drawing.Point(210, 46)
+$ultimateAutoBuyLabel.Size = New-Object System.Drawing.Size(130, 24)
+$ultimateAutoBuyLabel.Text = 'AutoBuyCar loops'
+$ultimateTab.Controls.Add($ultimateAutoBuyLabel)
+
+$ultimateAutoBuyInput = New-Object System.Windows.Forms.NumericUpDown
+$ultimateAutoBuyInput.Location = New-Object System.Drawing.Point(344, 44)
+$ultimateAutoBuyInput.Size = New-Object System.Drawing.Size(72, 24)
+$ultimateAutoBuyInput.Minimum = 1
+$ultimateAutoBuyInput.Maximum = 9999
+$ultimateAutoBuyInput.Value = 1
+$ultimateTab.Controls.Add($ultimateAutoBuyInput)
+
+$ultimateInfoBox = New-Object System.Windows.Forms.TextBox
+$ultimateInfoBox.Location = New-Object System.Drawing.Point(16, 78)
+$ultimateInfoBox.Size = New-Object System.Drawing.Size(746, 118)
+$ultimateInfoBox.Multiline = $true
+$ultimateInfoBox.ReadOnly = $true
+$ultimateInfoBox.Text = "Ultimate is an independent workflow. It sends the configured menu macro, enters the share code, searches for the strict OCR target, selects it, runs its own Sequence loops, then a post-sequence macro, then the AutoBuyCar sequence.`r`nSet Sequence loops and AutoBuyCar loops above. AutoBuyCar reuses automation.autoBuyCar steps from config.json.`r`nIt uses the current foreground game window after the countdown. AFK and Automation cannot run at the same time as Ultimate."
+$ultimateTab.Controls.Add($ultimateInfoBox)
+
+$ultimateButtonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$ultimateButtonPanel.Location = New-Object System.Drawing.Point(16, 214)
+$ultimateButtonPanel.Size = New-Object System.Drawing.Size(760, 86)
+$ultimateButtonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+$ultimateButtonPanel.WrapContents = $true
+$ultimateTab.Controls.Add($ultimateButtonPanel)
+
+$startUltimateButton = New-AppButton -Text 'Start Ultimate'
+$stopUltimateButton = New-AppButton -Text 'Stop Ultimate'
+$refreshUltimateButton = New-AppButton -Text 'Refresh Status'
+$openUltimateLogButton = New-AppButton -Text 'Open Ultimate Log'
+@($startUltimateButton, $stopUltimateButton, $refreshUltimateButton, $openUltimateLogButton) |
+    ForEach-Object { $ultimateButtonPanel.Controls.Add($_) }
+
+$ultimateLogBox = New-Object System.Windows.Forms.TextBox
+$ultimateLogBox.Location = New-Object System.Drawing.Point(16, 318)
+$ultimateLogBox.Size = New-Object System.Drawing.Size(746, 210)
+$ultimateLogBox.Multiline = $true
+$ultimateLogBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+$ultimateLogBox.ReadOnly = $true
+$ultimateTab.Controls.Add($ultimateLogBox)
 
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
 $statusText = New-Object System.Windows.Forms.ToolStripStatusLabel
@@ -818,6 +1007,45 @@ function Refresh-AutomationPanel {
     }
 }
 
+function Update-UltimateLogPreview {
+    param($Paths)
+
+    if (Test-Path -LiteralPath $Paths.LogPath -PathType Leaf) {
+        $ultimateLogBox.Text = ((Get-Content -LiteralPath $Paths.LogPath -Tail 80 -Encoding UTF8) -join [Environment]::NewLine)
+    }
+    else {
+        $ultimateLogBox.Text = 'No ultimate log yet.'
+    }
+}
+
+function Set-UltimateLoopDefault {
+    Invoke-AppSafely -FailureTitle 'Ultimate Loops' -Action {
+        $config = Get-AppUltimateConfig
+        $options = Resolve-UltimateRuntimeOptions -Config $config
+        $value = [Math]::Min([decimal]$ultimateLoopInput.Maximum, [Math]::Max([decimal]$ultimateLoopInput.Minimum, [decimal]$options.SequenceLoopCount))
+        $ultimateLoopInput.Value = $value
+
+        $autoConfig = Get-AppAutomationConfig
+        $autoOptions = Resolve-AutomationRuntimeOptions -Config $autoConfig -Mode 'AutoBuyCar'
+        $autoValue = [Math]::Min([decimal]$ultimateAutoBuyInput.Maximum, [Math]::Max([decimal]$ultimateAutoBuyInput.Minimum, [decimal]$autoOptions.LoopCount))
+        $ultimateAutoBuyInput.Value = $autoValue
+    }
+}
+
+function Refresh-UltimatePanel {
+    Invoke-AppSafely -FailureTitle 'Ultimate Status' -Action {
+        $paths = Get-AppUltimatePaths
+        Initialize-UltimateWorkspace -Paths $paths
+        $config = Get-AppUltimateConfig
+        $options = Resolve-UltimateRuntimeOptions -Config $config
+        $state = Get-UltimateState -Paths $paths
+
+        $ultimateStatusLabel.Text = "Status: $($state.Status) - Input=$($options.InputMethod), Share=$($options.ShareCode), Target=$($options.TargetKeywords -join '+'), Loops=$($options.SequenceLoopCount), Search=$($options.SearchKey)/$($options.MaxSearchAttempts), Vertical=$($options.VerticalScanSteps)"
+        Update-UltimateLogPreview -Paths $paths
+        Set-AppStatusText 'Ultimate status refreshed.'
+    }
+}
+
 $refreshBackupButton.Add_Click({ Refresh-BackupPanel })
 $backupNowButton.Add_Click({
     Invoke-AppSafely -FailureTitle 'Backup Now' -Action {
@@ -959,6 +1187,9 @@ $startAutomationButton.Add_Click({
         if ($mode -eq 'AutoBuyCar') {
             $sequenceText = "AutoBuyCar will run $($options.LoopCount) loop(s). Steps=$(@($options.AutoBuyCarSteps).Count), between loops=$($options.AutoBuyCarBetweenLoopsMilliseconds)ms, input=$($options.InputMethod)."
         }
+        elseif ($mode -eq 'DeleteCar') {
+            $sequenceText = "DeleteCar will run $($options.LoopCount) loop(s). Steps=$(@($options.DeleteCarSteps).Count), between loops=$($options.DeleteCarBetweenLoopsMilliseconds)ms, input=$($options.InputMethod)."
+        }
         else {
             $sequenceText = "FindNewSubaru will run $($options.LoopCount) loop(s). Search key=$($options.FindNewSubaruSearchKey), max attempts=$($options.FindNewSubaruMaxSearchAttempts), input=$($options.InputMethod), after-select delay=$($options.FindNewSubaruAfterSelectDelayMilliseconds)ms. OCR confirmation=$($options.FindNewSubaruRequireTargetConfirmation)."
         }
@@ -995,12 +1226,55 @@ $openAutomationLogButton.Add_Click({
     }
 })
 
+$refreshUltimateButton.Add_Click({ Refresh-UltimatePanel })
+$startUltimateButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Start Ultimate' -Action {
+        $config = Get-AppUltimateConfig
+        $ultimateLoops = [int]$ultimateLoopInput.Value
+        $ultimateAutoBuyLoops = [int]$ultimateAutoBuyInput.Value
+        $options = Resolve-UltimateRuntimeOptions -Config $config -SequenceLoopCount $ultimateLoops
+        $sequenceText = "Ultimate will enter share code $($options.ShareCode), search target [$($options.TargetKeywords -join ', ')], run $($options.SequenceLoopCount) Sequence loop(s), then the post-sequence macro and $ultimateAutoBuyLoops AutoBuyCar loop(s). Input=$($options.InputMethod)."
+
+        $confirmation = [System.Windows.Forms.MessageBox]::Show(
+            "Ultimate will send keys to the current foreground window.`r`n`r`nAfter clicking OK, switch to the game window within $($options.StartupDelaySeconds) seconds.`r`n`r`n$sequenceText",
+            'Start Ultimate',
+            [System.Windows.Forms.MessageBoxButtons]::OKCancel,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+        if ($confirmation -ne [System.Windows.Forms.DialogResult]::OK) {
+            return
+        }
+
+        $message = Start-AppUltimate -SequenceLoopCount $ultimateLoops -AutoBuyCarLoopCount $ultimateAutoBuyLoops
+        Set-AppStatusText $message
+        Refresh-UltimatePanel
+        Show-AppMessage -Message $message
+    }
+})
+$stopUltimateButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Stop Ultimate' -Action {
+        $message = Stop-AppUltimate
+        Set-AppStatusText $message
+        Refresh-UltimatePanel
+        Show-AppMessage -Message $message
+    }
+})
+$openUltimateLogButton.Add_Click({
+    Invoke-AppSafely -FailureTitle 'Open Ultimate Log' -Action {
+        $paths = Get-AppUltimatePaths
+        Initialize-UltimateWorkspace -Paths $paths
+        Open-AppPath -Path $paths.LogPath -EnsureFile
+    }
+})
+
 $form.Add_Shown({
     Refresh-BackupPanel
     Refresh-FocusPanel
     Refresh-AfkPanel
     Refresh-AutomationPanel
+    Refresh-UltimatePanel
     Set-AutomationLoopDefault
+    Set-UltimateLoopDefault
     Refresh-WindowList
 })
 
