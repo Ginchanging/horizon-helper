@@ -6,6 +6,7 @@ param(
     [int]$AutoBuyCarLoopCount = -1,
     [int]$FindNewSubaruLoopCount = -1,
     [int]$StartFromStep = -1,
+    [int]$WorkflowLoopCount = -1,
     [string]$RecognitionImagePath,
     [switch]$AssumeTargetFound,
     [switch]$DryRun
@@ -39,7 +40,7 @@ $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Par
 $paths = Get-UltimatePaths -AppRoot $AppRoot
 Initialize-UltimateWorkspace -Paths $paths
 $config = Get-UltimateConfig -AppRoot $paths.AppRoot
-$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep
+$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep -WorkflowLoopCount $WorkflowLoopCount
 $automationConfig = Get-AutomationConfig -AppRoot $paths.AppRoot
 $autoBuyCarOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'AutoBuyCar' -LoopCount $options.AutoBuyCarLoopCount
 $findNewSubaruOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'FindNewSubaru' -LoopCount $options.FindNewSubaruLoopCount
@@ -61,6 +62,46 @@ function Wait-UltimateSeconds {
 
     if ($Seconds -gt 0 -and -not $DryRun) {
         Start-Sleep -Seconds $Seconds
+    }
+}
+
+function Invoke-UltimateThrottleWait {
+    # The Sequence loop presses Enter to start the in-race drive, then waits SequenceEnterDelaySeconds.
+    # During that wait, hold the virtual-gamepad throttle (right trigger) so the car drives forward the
+    # whole time, then release it before the menu keys. Falls back to a plain wait when the gamepad is
+    # not active (DryRun, gamepad throttle disabled, or driver/DLL unavailable). The controller itself
+    # is connected once at startup and kept plugged in for the whole run -- only the trigger value
+    # changes here -- so the game never sees a disconnect between drives.
+    param(
+        [Parameter(Mandatory = $true)][int]$Seconds,
+        [int]$LoopIndex = 0
+    )
+
+    if ($DryRun) {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Throttle wait skipped (DryRun). Loop=$LoopIndex Seconds=$Seconds"
+        return
+    }
+    if (-not (Test-AfkGamepadConnected)) {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Gamepad throttle not active; plain wait. Loop=$LoopIndex Seconds=$Seconds"
+        Wait-UltimateSeconds -Seconds $Seconds
+        return
+    }
+
+    $triggerValue = $options.GamepadRightTriggerValue
+    Set-AfkGamepadRightTrigger -Value $triggerValue
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Throttle ON (RT=$triggerValue/255) for ${Seconds}s. Loop=$LoopIndex"
+    try {
+        $deadline = (Get-Date).AddSeconds($Seconds)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 1000
+            # ViGEm holds the last report, but re-submitting each second guards against a game that
+            # times out an idle controller, and keeps the input alive across the whole drive.
+            Set-AfkGamepadRightTrigger -Value $triggerValue
+        }
+    }
+    finally {
+        Set-AfkGamepadRightTrigger -Value 0
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Throttle OFF. Loop=$LoopIndex"
     }
 }
 
@@ -267,8 +308,9 @@ function Invoke-UltimateSequenceLoops {
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence loop started. Loop=$loop Total=$($options.SequenceLoopCount)"
 
         $enter1 = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence key sent. Loop=$loop Key=Enter WaitSeconds=$($options.SequenceEnterDelaySeconds) InputMethod=$($enter1.Method) DryRun=$DryRun"
-        Wait-UltimateSeconds -Seconds $options.SequenceEnterDelaySeconds
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence key sent. Loop=$loop Key=Enter WaitSeconds=$($options.SequenceEnterDelaySeconds) Throttle=$($options.GamepadThrottleEnabled) InputMethod=$($enter1.Method) DryRun=$DryRun"
+        # Hold the gamepad throttle (RT) during this Enter-wait so the car drives forward the whole time.
+        Invoke-UltimateThrottleWait -Seconds $options.SequenceEnterDelaySeconds -LoopIndex $loop
 
         $x1 = Send-AfkNamedKeyTap -Key 'X' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence key sent. Loop=$loop Key=X WaitMs=$($options.SequenceXDelayMilliseconds) InputMethod=$($x1.Method) DryRun=$DryRun"
@@ -342,7 +384,34 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     Initialize-AfkNative
 
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate started. PID=$PID DpiAware=$script:DpiAwareResult StartupDelay=$($options.StartupDelaySeconds) InputMethod=$($options.InputMethod) ShareCode=$($options.ShareCode) SequenceLoops=$($options.SequenceLoopCount) AutoBuyCarLoops=$($autoBuyCarOptions.LoopCount) FindNewSubaruLoops=$($findNewSubaruOptions.LoopCount) StartFromStep=$($options.StartFromStep) TargetKeywords='$($options.TargetKeywords -join ', ')' DryRun=$DryRun AssumeTargetFound=$AssumeTargetFound"
+    # Plug in the virtual Xbox 360 controller ONCE and keep it for the whole run. Only the right
+    # trigger is toggled later (held during each Sequence Enter-wait). Connecting once -- rather than
+    # per drive -- is what stops the game flashing a "controller disconnected" popup between loops.
+    # A connect failure here (driver/DLL missing) aborts the run via the surrounding try/catch so the
+    # problem is visible instead of silently running 40s drives that never move.
+    if ($options.GamepadThrottleEnabled -and -not $DryRun) {
+        [void](Connect-AfkGamepad -AppRoot $paths.AppRoot -DllPath $options.GamepadDllPath)
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Gamepad connected (virtual Xbox 360); kept plugged in for the whole run. RT during Sequence Enter-wait = $($options.GamepadRightTriggerValue)/255."
+    }
+    elseif ($options.GamepadThrottleEnabled) {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message 'Gamepad throttle enabled but DryRun: skipping virtual controller connect; Sequence Enter-wait will log only.'
+    }
+    else {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message 'Gamepad throttle disabled (ultimate.gamepadThrottle.enabled=false); Sequence Enter-wait uses a plain wait.'
+    }
+
+    $effectiveWorkflowLoops = $options.WorkflowLoopCount
+    $isInfiniteWorkflow = ($effectiveWorkflowLoops -le 0)
+    if ($DryRun -and $isInfiniteWorkflow) {
+        Write-UltimateLog -Paths $paths -Level 'WARN' -Message 'DryRun with an infinite workflow loop: capping to 1 iteration to avoid a runaway dry loop.'
+        $isInfiniteWorkflow = $false
+        $effectiveWorkflowLoops = 1
+    }
+    $workflowLoopLabel = if ($isInfiniteWorkflow) { 'infinite' } else { [string]$effectiveWorkflowLoops }
+    $estLoopSeconds = Get-UltimateEstimatedLoopSeconds -Options $options -AutoBuyCarOptions $autoBuyCarOptions -FindNewSubaruOptions $findNewSubaruOptions
+
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate started. PID=$PID DpiAware=$script:DpiAwareResult StartupDelay=$($options.StartupDelaySeconds) InputMethod=$($options.InputMethod) ShareCode=$($options.ShareCode) WorkflowLoops=$workflowLoopLabel EstPerLoop=$(Format-UltimateDuration -Seconds $estLoopSeconds) SequenceLoops=$($options.SequenceLoopCount) AutoBuyCarLoops=$($autoBuyCarOptions.LoopCount) FindNewSubaruLoops=$($findNewSubaruOptions.LoopCount) StartFromStep=$($options.StartFromStep) TargetKeywords='$($options.TargetKeywords -join ', ')' DryRun=$DryRun AssumeTargetFound=$AssumeTargetFound"
+    Set-UltimateProgress -Paths $paths -Status 'running' -CurrentLoop 0 -TotalLoops $effectiveWorkflowLoops -DisplayText "Starting - $workflowLoopLabel loop(s), ~$(Format-UltimateDuration -Seconds $estLoopSeconds)/loop (estimate)" -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 
     Wait-UltimateSeconds -Seconds $options.StartupDelaySeconds
 
@@ -365,53 +434,101 @@ try {
         Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Debug StartFromStep=$($options.StartFromStep): steps before $($options.StartFromStep) are skipped. The game must already be in the UI state that step $($options.StartFromStep) expects."
     }
 
-    if (Test-UltimateShouldRunStep -StepNumber 5 -StepName 'Prelude') {
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Prelude started. Steps=$(@($options.PreludeSteps).Count)"
-        Invoke-UltimateKeySteps -Steps $options.PreludeSteps -Mode 'Prelude'
-    }
-    if (Test-UltimateShouldRunStep -StepNumber 6 -StepName 'ShareCode') {
-        Invoke-UltimateShareCodeInput
-    }
-    if (Test-UltimateShouldRunStep -StepNumber 7 -StepName 'AfterCode') {
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "After-code macro started. Steps=$(@($options.AfterCodeSteps).Count)"
-        Invoke-UltimateKeySteps -Steps $options.AfterCodeSteps -Mode 'AfterCode'
+    # Outer workflow loop: repeat the WHOLE flow (steps 5-14) $effectiveWorkflowLoops times, or
+    # forever when infinite. Each iteration is timed so the ETA is refined from the upfront
+    # estimate to the measured per-loop average. The foreground window is captured once (above)
+    # and reused every iteration; the Prelude (Esc x4 ...) re-homes the menu state each loop.
+    $overallStart = Get-Date
+    $measuredLoopSeconds = @()
+    $iteration = 0
+    while ($isInfiniteWorkflow -or $iteration -lt $effectiveWorkflowLoops) {
+        $iteration++
+        $loopStart = Get-Date
+        $perLoopSeconds = if ($measuredLoopSeconds.Count -gt 0) { [double](($measuredLoopSeconds | Measure-Object -Average).Average) } else { $estLoopSeconds }
+
+        if ($isInfiniteWorkflow) {
+            $startText = "Loop $iteration (infinite) - ~$(Format-UltimateDuration -Seconds $perLoopSeconds)/loop, running $(Format-UltimateDuration -Seconds (((Get-Date) - $overallStart).TotalSeconds))"
+        }
+        else {
+            $remainingSeconds = ($effectiveWorkflowLoops - ($iteration - 1)) * $perLoopSeconds
+            $etaFinish = $loopStart.AddSeconds($remainingSeconds)
+            $etaClock = if ($etaFinish.Date -eq (Get-Date).Date) { $etaFinish.ToString('HH:mm') } else { $etaFinish.ToString('MM-dd HH:mm') }
+            $startText = "Loop $iteration/$effectiveWorkflowLoops - ~$(Format-UltimateDuration -Seconds $perLoopSeconds)/loop, ETA finish ~$etaClock (in $(Format-UltimateDuration -Seconds $remainingSeconds))"
+        }
+        Set-UltimateProgress -Paths $paths -Status 'running' -CurrentLoop $iteration -TotalLoops $effectiveWorkflowLoops -DisplayText $startText -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate loop started. $startText"
+
+        if (Test-UltimateShouldRunStep -StepNumber 5 -StepName 'Prelude') {
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Prelude started. Steps=$(@($options.PreludeSteps).Count)"
+            Invoke-UltimateKeySteps -Steps $options.PreludeSteps -Mode 'Prelude'
+        }
+        if (Test-UltimateShouldRunStep -StepNumber 6 -StepName 'ShareCode') {
+            Invoke-UltimateShareCodeInput
+        }
+        if (Test-UltimateShouldRunStep -StepNumber 7 -StepName 'AfterCode') {
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "After-code macro started. Steps=$(@($options.AfterCodeSteps).Count)"
+            Invoke-UltimateKeySteps -Steps $options.AfterCodeSteps -Mode 'AfterCode'
+        }
+
+        if (Test-UltimateShouldRunStep -StepNumber 8 -StepName 'TargetSearch') {
+            Invoke-UltimateTargetSearch -TargetWindow $targetWindow
+        }
+        if (Test-UltimateShouldRunStep -StepNumber 9 -StepName 'TargetConfirm') {
+            Invoke-UltimateTargetConfirm
+        }
+        if (Test-UltimateShouldRunStep -StepNumber 10 -StepName 'Sequence') {
+            Invoke-UltimateSequenceLoops
+        }
+
+        if (Test-UltimateShouldRunStep -StepNumber 11 -StepName 'PostSequence') {
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Post-sequence macro started. Steps=$(@($options.PostSequenceSteps).Count)"
+            Invoke-UltimateKeySteps -Steps $options.PostSequenceSteps -Mode 'PostSequence'
+        }
+        if (Test-UltimateShouldRunStep -StepNumber 12 -StepName 'AutoBuyCar') {
+            Invoke-UltimateAutoBuyCar
+        }
+
+        # Configurable settle delay between AutoBuyCar (step 12) and the Post-buy macro (step 13).
+        # Only waits when step 12 actually ran (StartFromStep <= 12); jumping straight to step 13+
+        # for debugging skips the wait. Tune via config.json ultimate.afterAutoBuyCarDelayMilliseconds.
+        if ($options.StartFromStep -le 12 -and $options.AfterAutoBuyCarDelayMilliseconds -gt 0) {
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Delay between AutoBuyCar and Post-buy macro. WaitMs=$($options.AfterAutoBuyCarDelayMilliseconds)"
+            Wait-UltimateMilliseconds -Milliseconds $options.AfterAutoBuyCarDelayMilliseconds
+        }
+
+        if (Test-UltimateShouldRunStep -StepNumber 13 -StepName 'PostBuy') {
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Post-buy macro started. Steps=$(@($options.PostBuySteps).Count)"
+            Invoke-UltimateKeySteps -Steps $options.PostBuySteps -Mode 'PostBuy'
+        }
+        if (Test-UltimateShouldRunStep -StepNumber 14 -StepName 'FindNewSubaru') {
+            Invoke-UltimateFindNewSubaru
+        }
+
+        $loopElapsed = ((Get-Date) - $loopStart).TotalSeconds
+        $measuredLoopSeconds += $loopElapsed
+        $avgSeconds = [double](($measuredLoopSeconds | Measure-Object -Average).Average)
+        if ($isInfiniteWorkflow) {
+            $doneText = "Loop $iteration done (infinite) - took $(Format-UltimateDuration -Seconds $loopElapsed), avg $(Format-UltimateDuration -Seconds $avgSeconds)/loop, running $(Format-UltimateDuration -Seconds (((Get-Date) - $overallStart).TotalSeconds))"
+        }
+        else {
+            $loopsLeft = $effectiveWorkflowLoops - $iteration
+            if ($loopsLeft -le 0) {
+                $doneText = "All $effectiveWorkflowLoops loop(s) done - total $(Format-UltimateDuration -Seconds (((Get-Date) - $overallStart).TotalSeconds))"
+            }
+            else {
+                $remainingAfter = $loopsLeft * $avgSeconds
+                $etaFinish2 = (Get-Date).AddSeconds($remainingAfter)
+                $etaClock2 = if ($etaFinish2.Date -eq (Get-Date).Date) { $etaFinish2.ToString('HH:mm') } else { $etaFinish2.ToString('MM-dd HH:mm') }
+                $doneText = "Loop $iteration/$effectiveWorkflowLoops done - avg $(Format-UltimateDuration -Seconds $avgSeconds)/loop, $loopsLeft left, ETA finish ~$etaClock2 (in $(Format-UltimateDuration -Seconds $remainingAfter))"
+            }
+        }
+        Set-UltimateProgress -Paths $paths -Status 'running' -CurrentLoop $iteration -TotalLoops $effectiveWorkflowLoops -DisplayText $doneText -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate loop completed. $doneText"
     }
 
-    if (Test-UltimateShouldRunStep -StepNumber 8 -StepName 'TargetSearch') {
-        Invoke-UltimateTargetSearch -TargetWindow $targetWindow
-    }
-    if (Test-UltimateShouldRunStep -StepNumber 9 -StepName 'TargetConfirm') {
-        Invoke-UltimateTargetConfirm
-    }
-    if (Test-UltimateShouldRunStep -StepNumber 10 -StepName 'Sequence') {
-        Invoke-UltimateSequenceLoops
-    }
-
-    if (Test-UltimateShouldRunStep -StepNumber 11 -StepName 'PostSequence') {
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Post-sequence macro started. Steps=$(@($options.PostSequenceSteps).Count)"
-        Invoke-UltimateKeySteps -Steps $options.PostSequenceSteps -Mode 'PostSequence'
-    }
-    if (Test-UltimateShouldRunStep -StepNumber 12 -StepName 'AutoBuyCar') {
-        Invoke-UltimateAutoBuyCar
-    }
-
-    # Configurable settle delay between AutoBuyCar (step 12) and the Post-buy macro (step 13).
-    # Only waits when step 12 actually ran (StartFromStep <= 12); jumping straight to step 13+
-    # for debugging skips the wait. Tune via config.json ultimate.afterAutoBuyCarDelayMilliseconds.
-    if ($options.StartFromStep -le 12 -and $options.AfterAutoBuyCarDelayMilliseconds -gt 0) {
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Delay between AutoBuyCar and Post-buy macro. WaitMs=$($options.AfterAutoBuyCarDelayMilliseconds)"
-        Wait-UltimateMilliseconds -Milliseconds $options.AfterAutoBuyCarDelayMilliseconds
-    }
-
-    if (Test-UltimateShouldRunStep -StepNumber 13 -StepName 'PostBuy') {
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Post-buy macro started. Steps=$(@($options.PostBuySteps).Count)"
-        Invoke-UltimateKeySteps -Steps $options.PostBuySteps -Mode 'PostBuy'
-    }
-    if (Test-UltimateShouldRunStep -StepNumber 14 -StepName 'FindNewSubaru') {
-        Invoke-UltimateFindNewSubaru
-    }
-
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate completed. PID=$PID"
+    $completedText = "All $effectiveWorkflowLoops loop(s) completed - total $(Format-UltimateDuration -Seconds (((Get-Date) - $overallStart).TotalSeconds))"
+    Set-UltimateProgress -Paths $paths -Status 'completed' -CurrentLoop $iteration -TotalLoops $effectiveWorkflowLoops -DisplayText $completedText -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate completed. PID=$PID Iterations=$iteration"
 }
 catch {
     Write-UltimateLog -Paths $paths -Level 'ERROR' -Message "Ultimate stopped because of an error. Error=$($_.Exception.Message)"
@@ -419,6 +536,9 @@ catch {
 }
 finally {
     Release-AfkKeys -DryRun:$DryRun
+    # Zero the throttle and unplug the virtual controller on a clean exit/error. (On a force-Stop the
+    # finally does not run, but the OS auto-unplugs the pad when this process dies, so it still cleans up.)
+    Disconnect-AfkGamepad
     Remove-UltimatePid -Paths $paths
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate exited. PID=$PID"
 }

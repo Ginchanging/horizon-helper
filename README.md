@@ -164,6 +164,10 @@ If OCR sees a new non-target car or cannot read the card text, the workflow logs
 
 Ultimate is independent from Backup, Focus Lock, AFK, and Automation. It sends a fixed setup macro, enters share code `705399298`, searches for the OCR target `1998 + 斯巴 + S1 + 790` (the 1998 Subaru S1 790; it matches `斯巴` rather than the full `斯巴鲁` because Windows OCR often misreads `鲁` as `兽`/`口`, while `斯`/`巴` read reliably and `1998 + S1 + 790` keep the target unambiguous), selects it, waits, then runs its own configured Sequence 80 times.
 
+During each Sequence loop's 40-second wait, Ultimate holds a virtual gamepad's right trigger (throttle) so the car keeps driving forward — Forza ignores injected keyboard while driving, so a held `W` key does not work.
+
+> **Gamepad throttle dependency (Ultimate only):** the throttle above needs the **ViGEmBus driver** (<https://github.com/nefarius/ViGEmBus/releases>; a modern signed driver, compatible with Windows 11 Memory Integrity, usually no reboot). The bundled `Nefarius.ViGEm.Client.dll` is already in the package. To disable it, set `ultimate.gamepadThrottle.enabled` to `false` in `config.json` and step 10 falls back to a plain wait. See "虚拟手柄油门" in `ULTIMATE.md`.
+
 Ultimate uses the current foreground window after the startup countdown. AFK and Automation cannot run at the same time as Ultimate. Focus Lock is not blocked, but it may interfere with normal focus behavior.
 
 ## Release Packaging

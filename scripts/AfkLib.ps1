@@ -753,6 +753,127 @@ function Remove-StaleAfkPid {
     }
 }
 
+# --- Virtual gamepad (ViGEm) -------------------------------------------------------------------------
+# A virtual Xbox 360 controller, used to HOLD the throttle (right trigger) so a driving game (Forza)
+# drives forward continuously -- something synthetic keyboard input cannot reliably do, because Forza
+# ignores SendInput-injected keys while driving. Backed by the managed Nefarius.ViGEm.Client.dll
+# (native lib embedded) + the ViGEmBus driver. Loaded lazily on first Connect so the GUI / other
+# subsystems that dot-source this file pay nothing unless a gamepad is actually used.
+#
+# IMPORTANT: connect ONCE per run and keep it plugged in until the run ends. Plugging/unplugging the
+# controller per drive makes the game flash a "controller disconnected" popup every loop; a single
+# long-lived connection keeps the game seeing a controller the whole time. The pad is auto-unplugged
+# when this process exits (so a force-Stop still cleans up at the OS level).
+
+# Connection state for the lazily-loaded virtual gamepad. Initialized once when this lib is
+# dot-sourced (the worker / GUI each dot-source it exactly once), so StrictMode reads are safe.
+$script:AfkGamepadClient = $null
+$script:AfkGamepadPad = $null
+
+function Get-AfkGamepadDllPath {
+    [CmdletBinding()]
+    param(
+        [string]$AppRoot
+    )
+
+    $root = Get-AfkAppRoot -AppRoot $AppRoot
+    $candidates = @(
+        (Join-Path $root 'Nefarius.ViGEm.Client.dll'),
+        (Join-Path $root 'lib\Nefarius.ViGEm.Client.dll')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Test-AfkGamepadConnected {
+    [CmdletBinding()]
+    param()
+
+    return ($null -ne $script:AfkGamepadPad)
+}
+
+function Connect-AfkGamepad {
+    [CmdletBinding()]
+    param(
+        [string]$AppRoot,
+        [string]$DllPath,
+        [switch]$DryRun
+    )
+
+    if ($DryRun) {
+        return $false
+    }
+    if ($null -ne $script:AfkGamepadPad) {
+        return $true
+    }
+
+    if ([string]::IsNullOrWhiteSpace($DllPath)) {
+        $DllPath = Get-AfkGamepadDllPath -AppRoot $AppRoot
+    }
+    if ([string]::IsNullOrWhiteSpace($DllPath) -or -not (Test-Path -LiteralPath $DllPath -PathType Leaf)) {
+        throw "ViGEm client DLL (Nefarius.ViGEm.Client.dll) not found. Place it at the app root (next to GameSaveGuardian.ps1) or set ultimate.gamepadThrottle.dllPath."
+    }
+    $DllPath = (Resolve-Path -LiteralPath $DllPath).Path
+    try { Unblock-File -LiteralPath $DllPath -ErrorAction SilentlyContinue } catch { }
+    [void][Reflection.Assembly]::LoadFrom($DllPath)
+
+    $client = $null
+    try {
+        $client = New-Object Nefarius.ViGEm.Client.ViGEmClient
+    }
+    catch {
+        $inner = $_.Exception
+        if ($inner.InnerException) { $inner = $inner.InnerException }
+        if ($inner.GetType().Name -eq 'VigemBusNotFoundException') {
+            throw 'ViGEmBus driver is not installed. Install it from https://github.com/nefarius/ViGEmBus/releases then retry.'
+        }
+        throw
+    }
+
+    $pad = $client.CreateXbox360Controller()
+    $pad.Connect()
+    $script:AfkGamepadClient = $client
+    $script:AfkGamepadPad = $pad
+    return $true
+}
+
+function Set-AfkGamepadRightTrigger {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateRange(0, 255)][int]$Value
+    )
+
+    if ($null -eq $script:AfkGamepadPad) {
+        throw 'Gamepad is not connected. Call Connect-AfkGamepad first.'
+    }
+    $script:AfkGamepadPad.SetSliderValue([Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Slider]::RightTrigger, [byte]$Value)
+    $script:AfkGamepadPad.SubmitReport()
+}
+
+function Disconnect-AfkGamepad {
+    [CmdletBinding()]
+    param()
+
+    if ($null -ne $script:AfkGamepadPad) {
+        try {
+            $script:AfkGamepadPad.SetSliderValue([Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Slider]::RightTrigger, [byte]0)
+            $script:AfkGamepadPad.SetAxisValue([Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Axis]::LeftThumbY, [short]0)
+            $script:AfkGamepadPad.SubmitReport()
+            $script:AfkGamepadPad.Disconnect()
+        }
+        catch { }
+        $script:AfkGamepadPad = $null
+    }
+    if ($null -ne $script:AfkGamepadClient) {
+        try { $script:AfkGamepadClient.Dispose() } catch { }
+        $script:AfkGamepadClient = $null
+    }
+}
+
 function Release-AfkKeys {
     [CmdletBinding()]
     param(

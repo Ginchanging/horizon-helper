@@ -5,6 +5,7 @@ param(
     [int]$AutoBuyCarLoopCount = -1,
     [int]$FindNewSubaruLoopCount = -1,
     [int]$StartFromStep = -1,
+    [int]$WorkflowLoopCount = -1,
     [string]$RecognitionImagePath,
     [switch]$AssumeTargetFound,
     [switch]$DryRun
@@ -19,7 +20,7 @@ $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Par
 $paths = Get-UltimatePaths -AppRoot $scriptRoot
 Initialize-UltimateWorkspace -Paths $paths
 $config = Get-UltimateConfig -AppRoot $scriptRoot
-$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep
+$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep -WorkflowLoopCount $WorkflowLoopCount
 
 $state = Get-UltimateState -Paths $paths
 if ($state.Status -in @('Running', 'RunningUnverified')) {
@@ -55,7 +56,8 @@ $argumentList = @(
     '-SequenceLoopCount', ([string]$options.SequenceLoopCount),
     '-AutoBuyCarLoopCount', ([string]$options.AutoBuyCarLoopCount),
     '-FindNewSubaruLoopCount', ([string]$options.FindNewSubaruLoopCount),
-    '-StartFromStep', ([string]$options.StartFromStep)
+    '-StartFromStep', ([string]$options.StartFromStep),
+    '-WorkflowLoopCount', ([string]$options.WorkflowLoopCount)
 )
 if (-not [string]::IsNullOrWhiteSpace($RecognitionImagePath)) {
     $argumentList += @('-RecognitionImagePath', ('"{0}"' -f $RecognitionImagePath))
@@ -84,6 +86,7 @@ if ($newState -and $newState.Status -in @('Running', 'RunningUnverified')) {
     Write-Host "Input method: $($options.InputMethod)"
     Write-Host "Share code: $($options.ShareCode)"
     Write-Host "Target keywords: $($options.TargetKeywords -join ', ')"
+    Write-Host "Workflow loops: $(if ($options.WorkflowLoopCount -le 0) { 'infinite (run until stopped)' } else { $options.WorkflowLoopCount })"
     Write-Host "Sequence loops: $($options.SequenceLoopCount)"
     Write-Host "Sequence timing: EnterDelay=$($options.SequenceEnterDelaySeconds)s XDelay=$($options.SequenceXDelayMilliseconds)ms LoopDelay=$($options.SequenceLoopDelaySeconds)s"
     if ($options.StartFromStep -gt 5) {

@@ -398,13 +398,14 @@ function Start-AppUltimate {
         [int]$SequenceLoopCount = -1,
         [int]$AutoBuyCarLoopCount = -1,
         [int]$FindNewSubaruLoopCount = -1,
-        [int]$StartFromStep = -1
+        [int]$StartFromStep = -1,
+        [int]$WorkflowLoopCount = -1
     )
 
     $paths = Get-AppUltimatePaths
     Initialize-UltimateWorkspace -Paths $paths
     $config = Get-AppUltimateConfig
-    $options = Resolve-UltimateRuntimeOptions -Config $config -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep
+    $options = Resolve-UltimateRuntimeOptions -Config $config -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep -WorkflowLoopCount $WorkflowLoopCount
 
     $afkPaths = Get-AppAfkPaths
     Initialize-AfkWorkspace -Paths $afkPaths
@@ -438,7 +439,8 @@ function Start-AppUltimate {
         '-SequenceLoopCount', ([string]$options.SequenceLoopCount),
         '-AutoBuyCarLoopCount', ([string]$options.AutoBuyCarLoopCount),
         '-FindNewSubaruLoopCount', ([string]$options.FindNewSubaruLoopCount),
-        '-StartFromStep', ([string]$options.StartFromStep)
+        '-StartFromStep', ([string]$options.StartFromStep),
+        '-WorkflowLoopCount', ([string]$options.WorkflowLoopCount)
     )
 
     $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -WindowStyle Hidden -PassThru
@@ -848,32 +850,57 @@ $ultimateFindInput.Maximum = 9999
 $ultimateFindInput.Value = 1
 $ultimateTab.Controls.Add($ultimateFindInput)
 
+$ultimateWorkflowLabel = New-Object System.Windows.Forms.Label
+$ultimateWorkflowLabel.Location = New-Object System.Drawing.Point(16, 74)
+$ultimateWorkflowLabel.Size = New-Object System.Drawing.Size(92, 24)
+$ultimateWorkflowLabel.Text = 'Ultimate loops'
+$ultimateTab.Controls.Add($ultimateWorkflowLabel)
+
+$ultimateWorkflowInput = New-Object System.Windows.Forms.NumericUpDown
+$ultimateWorkflowInput.Location = New-Object System.Drawing.Point(110, 72)
+$ultimateWorkflowInput.Size = New-Object System.Drawing.Size(58, 24)
+$ultimateWorkflowInput.Minimum = 1
+$ultimateWorkflowInput.Maximum = 99999
+$ultimateWorkflowInput.Value = 1
+$ultimateTab.Controls.Add($ultimateWorkflowInput)
+
+$ultimateWorkflowForever = New-Object System.Windows.Forms.CheckBox
+$ultimateWorkflowForever.Location = New-Object System.Drawing.Point(174, 73)
+$ultimateWorkflowForever.Size = New-Object System.Drawing.Size(80, 24)
+$ultimateWorkflowForever.Text = 'Forever'
+$ultimateTab.Controls.Add($ultimateWorkflowForever)
+
 $ultimateStartStepLabel = New-Object System.Windows.Forms.Label
-$ultimateStartStepLabel.Location = New-Object System.Drawing.Point(16, 74)
-$ultimateStartStepLabel.Size = New-Object System.Drawing.Size(148, 24)
-$ultimateStartStepLabel.Text = 'Debug start step'
+$ultimateStartStepLabel.Location = New-Object System.Drawing.Point(262, 74)
+$ultimateStartStepLabel.Size = New-Object System.Drawing.Size(72, 24)
+$ultimateStartStepLabel.Text = 'Debug step'
 $ultimateTab.Controls.Add($ultimateStartStepLabel)
 
 $ultimateStartStepInput = New-Object System.Windows.Forms.NumericUpDown
-$ultimateStartStepInput.Location = New-Object System.Drawing.Point(170, 72)
-$ultimateStartStepInput.Size = New-Object System.Drawing.Size(60, 24)
+$ultimateStartStepInput.Location = New-Object System.Drawing.Point(336, 72)
+$ultimateStartStepInput.Size = New-Object System.Drawing.Size(50, 24)
 $ultimateStartStepInput.Minimum = 5
 $ultimateStartStepInput.Maximum = 14
 $ultimateStartStepInput.Value = 5
 $ultimateTab.Controls.Add($ultimateStartStepInput)
 
 $ultimateStartStepHint = New-Object System.Windows.Forms.Label
-$ultimateStartStepHint.Location = New-Object System.Drawing.Point(238, 74)
-$ultimateStartStepHint.Size = New-Object System.Drawing.Size(524, 24)
-$ultimateStartStepHint.Text = '5 = full run; 8 = Search; 10 = Sequence; 11 = Post-seq; 13 = Post-buy; 14 = FindNewSubaru'
+$ultimateStartStepHint.Location = New-Object System.Drawing.Point(394, 74)
+$ultimateStartStepHint.Size = New-Object System.Drawing.Size(368, 24)
+$ultimateStartStepHint.Text = 'step 5-14; 5 = full run, 14 = FindNewSubaru. Forever = loop until stopped.'
 $ultimateTab.Controls.Add($ultimateStartStepHint)
+
+# Disable the loop-count box while "Forever" is checked (infinite has no count).
+$ultimateWorkflowForever.Add_CheckedChanged({
+    $ultimateWorkflowInput.Enabled = -not $ultimateWorkflowForever.Checked
+})
 
 $ultimateInfoBox = New-Object System.Windows.Forms.TextBox
 $ultimateInfoBox.Location = New-Object System.Drawing.Point(16, 108)
 $ultimateInfoBox.Size = New-Object System.Drawing.Size(746, 118)
 $ultimateInfoBox.Multiline = $true
 $ultimateInfoBox.ReadOnly = $true
-$ultimateInfoBox.Text = "Ultimate is an independent workflow. It sends the configured menu macro, enters the share code, searches for the strict OCR target, selects it, runs its own Sequence loops, then a post-sequence macro, the AutoBuyCar sequence, a post-buy macro, and finally the FindNewSubaru search-and-buy loop.`r`nSet Sequence / AutoBuyCar / FindNewSubaru loops above. AutoBuyCar and FindNewSubaru reuse the automation.* steps from config.json.`r`nDebug start step (5-14) skips earlier phases for testing - the game must already be at the UI state that step expects; the startup countdown still runs so you can switch to the game. Leave it at 5 for a full run.`r`nThe status line shows the cumulative number of cars AutoBuyCar has bought (kept across runs); press Clear Count to reset it to 0.`r`nIt uses the current foreground game window after the countdown. AFK and Automation cannot run at the same time as Ultimate."
+$ultimateInfoBox.Text = "Ultimate is an independent workflow. It sends the configured menu macro, enters the share code, searches for the strict OCR target, selects it, runs its own Sequence loops, then a post-sequence macro, the AutoBuyCar sequence, a post-buy macro, and finally the FindNewSubaru search-and-buy loop.`r`nUltimate loops = how many times to repeat the WHOLE workflow; tick Forever for an unlimited loop (runs until you press Stop). The status line shows the current loop and an estimated finish time.`r`nSet Sequence / AutoBuyCar / FindNewSubaru loops above. AutoBuyCar and FindNewSubaru reuse the automation.* steps from config.json.`r`nDebug step (5-14) skips earlier phases for testing - the game must already be at the UI state that step expects. Leave it at 5 for a full run.`r`nThe status line also shows the cumulative cars AutoBuyCar has bought (kept across runs); Clear Count resets it. AFK and Automation cannot run at the same time as Ultimate."
 $ultimateTab.Controls.Add($ultimateInfoBox)
 
 $ultimateButtonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -1064,6 +1091,17 @@ function Set-UltimateLoopDefault {
         $value = [Math]::Min([decimal]$ultimateLoopInput.Maximum, [Math]::Max([decimal]$ultimateLoopInput.Minimum, [decimal]$options.SequenceLoopCount))
         $ultimateLoopInput.Value = $value
 
+        # workflowLoopCount of 0 = infinite -> tick Forever; otherwise seed the count box.
+        if ($options.WorkflowLoopCount -le 0) {
+            $ultimateWorkflowForever.Checked = $true
+        }
+        else {
+            $ultimateWorkflowForever.Checked = $false
+            $workflowValue = [Math]::Min([decimal]$ultimateWorkflowInput.Maximum, [Math]::Max([decimal]$ultimateWorkflowInput.Minimum, [decimal]$options.WorkflowLoopCount))
+            $ultimateWorkflowInput.Value = $workflowValue
+        }
+        $ultimateWorkflowInput.Enabled = -not $ultimateWorkflowForever.Checked
+
         $autoConfig = Get-AppAutomationConfig
         $autoOptions = Resolve-AutomationRuntimeOptions -Config $autoConfig -Mode 'AutoBuyCar'
         $autoValue = [Math]::Min([decimal]$ultimateAutoBuyInput.Maximum, [Math]::Max([decimal]$ultimateAutoBuyInput.Minimum, [decimal]$autoOptions.LoopCount))
@@ -1083,8 +1121,17 @@ function Refresh-UltimatePanel {
         $options = Resolve-UltimateRuntimeOptions -Config $config
         $state = Get-UltimateState -Paths $paths
         $boughtTotal = Get-UltimateAutoBuyCount -Paths $paths
+        $progress = Get-UltimateProgress -Paths $paths
+        $isRunning = $state.Status -in @('Running', 'RunningUnverified')
 
-        $ultimateStatusLabel.Text = "Status: $($state.Status) - AutoBuyCar bought (total)=$boughtTotal | Input=$($options.InputMethod), Share=$($options.ShareCode), Target=$($options.TargetKeywords -join '+'), Loops=$($options.SequenceLoopCount), Search=$($options.SearchKey)/$($options.MaxSearchAttempts), Vertical=$($options.VerticalScanSteps)"
+        $progressText = ''
+        if ($progress -and -not [string]::IsNullOrWhiteSpace($progress.DisplayText)) {
+            if ($isRunning) { $progressText = " | $($progress.DisplayText)" }
+            elseif ($progress.Status -eq 'completed') { $progressText = " | Last run: $($progress.DisplayText)" }
+            else { $progressText = " | (stopped) $($progress.DisplayText)" }
+        }
+
+        $ultimateStatusLabel.Text = "Status: $($state.Status)$progressText | Bought(total)=$boughtTotal | Seq=$($options.SequenceLoopCount) Search=$($options.SearchKey)/$($options.MaxSearchAttempts) Input=$($options.InputMethod)"
         Update-UltimateLogPreview -Paths $paths
         Set-AppStatusText 'Ultimate status refreshed.'
     }
@@ -1278,8 +1325,10 @@ $startUltimateButton.Add_Click({
         $ultimateAutoBuyLoops = [int]$ultimateAutoBuyInput.Value
         $ultimateFindLoops = [int]$ultimateFindInput.Value
         $ultimateStartStep = [int]$ultimateStartStepInput.Value
-        $options = Resolve-UltimateRuntimeOptions -Config $config -SequenceLoopCount $ultimateLoops
-        $sequenceText = "Ultimate will enter share code $($options.ShareCode), search target [$($options.TargetKeywords -join ', ')], run $($options.SequenceLoopCount) Sequence loop(s), then the post-sequence macro, $ultimateAutoBuyLoops AutoBuyCar loop(s), the post-buy macro, then $ultimateFindLoops FindNewSubaru loop(s). Input=$($options.InputMethod)."
+        $ultimateWorkflowLoops = if ($ultimateWorkflowForever.Checked) { 0 } else { [int]$ultimateWorkflowInput.Value }
+        $options = Resolve-UltimateRuntimeOptions -Config $config -SequenceLoopCount $ultimateLoops -WorkflowLoopCount $ultimateWorkflowLoops
+        $workflowText = if ($options.WorkflowLoopCount -le 0) { 'Repeat the whole workflow forever (until Stop).' } else { "Repeat the whole workflow $($options.WorkflowLoopCount) time(s)." }
+        $sequenceText = "$workflowText Each run: enter share code $($options.ShareCode), search target [$($options.TargetKeywords -join ', ')], run $($options.SequenceLoopCount) Sequence loop(s), the post-sequence macro, $ultimateAutoBuyLoops AutoBuyCar loop(s), the post-buy macro, then $ultimateFindLoops FindNewSubaru loop(s). Input=$($options.InputMethod)."
         if ($ultimateStartStep -gt 5) {
             $sequenceText = "[DEBUG] Starting at step $ultimateStartStep - all earlier steps are skipped. Make sure the game is already at the UI state step $ultimateStartStep expects.`r`n`r`n$sequenceText"
         }
@@ -1294,7 +1343,7 @@ $startUltimateButton.Add_Click({
             return
         }
 
-        $message = Start-AppUltimate -SequenceLoopCount $ultimateLoops -AutoBuyCarLoopCount $ultimateAutoBuyLoops -FindNewSubaruLoopCount $ultimateFindLoops -StartFromStep $ultimateStartStep
+        $message = Start-AppUltimate -SequenceLoopCount $ultimateLoops -AutoBuyCarLoopCount $ultimateAutoBuyLoops -FindNewSubaruLoopCount $ultimateFindLoops -StartFromStep $ultimateStartStep -WorkflowLoopCount $ultimateWorkflowLoops
         Set-AppStatusText $message
         Refresh-UltimatePanel
         Show-AppMessage -Message $message

@@ -65,7 +65,10 @@ Ultimate 终极流程：
 - 先执行固定菜单宏，输入分享代码 `705399298`。
 - 使用 Windows OCR 查找同时匹配 `1998`、`斯巴`、`S1`、`790` 的车辆卡（目标就是 1998 斯巴鲁 S1 790；这里用 `斯巴` 而不是 `斯巴鲁`，因为 OCR 经常把 `鲁` 误读成 `兽`、`口`，而 `斯`、`巴` 识别稳定）。
 - 命中后按 `Enter`，等待配置时间，再执行独立的 80 轮 `Sequence`。
+- 每轮 `Sequence` 的 40 秒等待期间，用虚拟手柄按住右扳机（油门）让车持续前进——因为 Forza 开车时会忽略注入的键盘，纯按键无法持续前进。
 - Ultimate 和 AFK、Automation 不能同时运行。
+
+> **手柄油门依赖（仅 Ultimate）**：上面的手柄油门需要安装 **ViGEmBus 驱动**（<https://github.com/nefarius/ViGEmBus/releases>，现代签名驱动，和 Win11 内存完整性兼容，通常免重启），随附的 `Nefarius.ViGEm.Client.dll` 已在包内。不想用时把 `config.json` 的 `ultimate.gamepadThrottle.enabled` 设为 `false`，第 10 步会退回纯等待。详见 `ULTIMATE.md` 的「虚拟手柄油门」。
 
 ## 高级脚本入口
 

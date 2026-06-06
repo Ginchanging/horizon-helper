@@ -28,6 +28,7 @@ function Get-UltimatePaths {
         PidPath          = Join-Path $runtimeRoot 'ultimate.pid'
         LogPath          = Join-Path $logsRoot 'ultimate.log'
         AutoBuyCountPath = Join-Path $runtimeRoot 'ultimate-autobuy-count.txt'
+        ProgressPath     = Join-Path $runtimeRoot 'ultimate-progress.json'
     }
 }
 
@@ -248,6 +249,8 @@ function Get-UltimateConfig {
     # Pause inserted between the AutoBuyCar phase (step 12) and the Post-buy macro (step 13)
     # so the purchase screens have time to settle before the macro backs out of them.
     $afterAutoBuyCarDelayMilliseconds = 2000
+    # How many times the WHOLE Ultimate workflow repeats. 0 = infinite (run until stopped).
+    $workflowLoopCount = 1
     $sequenceLoopCount = 80
     $sequenceEnterDelaySeconds = 40
     $sequenceXDelayMilliseconds = 500
@@ -270,6 +273,12 @@ function Get-UltimateConfig {
     $searchSettleMilliseconds = 500
     $maxSearchAttempts = 50
     $verticalScanSteps = 2
+    # Virtual-gamepad throttle: during the Sequence loop's Enter-wait (the in-race drive), hold the
+    # controller right trigger so the car drives forward. Needs the ViGEmBus driver + the client DLL.
+    # The controller stays plugged in for the whole run so the game never flashes a disconnect popup.
+    $gamepadThrottleEnabled = $true
+    $gamepadRightTriggerValue = 255
+    $gamepadDllPath = ''
 
     if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         $rawConfig = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
@@ -284,6 +293,7 @@ function Get-UltimateConfig {
             $afterTargetSelectDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterTargetSelectDelayMilliseconds' -DefaultValue $afterTargetSelectDelayMilliseconds
             $afterTargetConfirmDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterTargetConfirmDelayMilliseconds' -DefaultValue $afterTargetConfirmDelayMilliseconds
             $afterAutoBuyCarDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterAutoBuyCarDelayMilliseconds' -DefaultValue $afterAutoBuyCarDelayMilliseconds
+            $workflowLoopCount = Get-UltimateConfigIntValue -Object $ultimate -Name 'workflowLoopCount' -DefaultValue $workflowLoopCount
             $sequenceLoopCount = Get-UltimateConfigIntValue -Object $ultimate -Name 'sequenceLoopCount' -DefaultValue $sequenceLoopCount
             $searchKey = Normalize-AfkKeyName -Key (Get-UltimateConfigStringValue -Object $ultimate -Name 'searchKey' -DefaultValue $searchKey)
             $searchSettleMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'searchSettleMilliseconds' -DefaultValue $searchSettleMilliseconds
@@ -303,6 +313,15 @@ function Get-UltimateConfig {
                 $sequenceEnterDelaySeconds = Get-UltimateConfigIntValue -Object $sequence -Name 'enterDelaySeconds' -DefaultValue $sequenceEnterDelaySeconds
                 $sequenceXDelayMilliseconds = Get-UltimateConfigIntValue -Object $sequence -Name 'xDelayMilliseconds' -DefaultValue $sequenceXDelayMilliseconds
                 $sequenceLoopDelaySeconds = Get-UltimateConfigIntValue -Object $sequence -Name 'loopDelaySeconds' -DefaultValue $sequenceLoopDelaySeconds
+            }
+
+            if ((Test-UltimateConfigProperty -Object $ultimate -Name 'gamepadThrottle') -and $null -ne $ultimate.gamepadThrottle) {
+                $gamepad = $ultimate.gamepadThrottle
+                if ((Test-UltimateConfigProperty -Object $gamepad -Name 'enabled') -and $null -ne $gamepad.enabled) {
+                    $gamepadThrottleEnabled = [bool]$gamepad.enabled
+                }
+                $gamepadRightTriggerValue = Get-UltimateConfigIntValue -Object $gamepad -Name 'rightTriggerValue' -DefaultValue $gamepadRightTriggerValue
+                $gamepadDllPath = Get-UltimateConfigStringValue -Object $gamepad -Name 'dllPath' -DefaultValue $gamepadDllPath
             }
         }
     }
@@ -327,6 +346,7 @@ function Get-UltimateConfig {
     }
 
     if ($sequenceLoopCount -lt 1) { throw "Config value 'ultimate.sequenceLoopCount' must be at least 1." }
+    if ($workflowLoopCount -lt 0) { throw "Config value 'ultimate.workflowLoopCount' cannot be negative (0 = infinite; >=1 = number of full Ultimate runs)." }
     if ($maxSearchAttempts -lt 0) { throw "Config value 'ultimate.maxSearchAttempts' cannot be negative (0 = unlimited; the search stops after one full loop of the list)." }
     if ($targetKeywords.Count -lt 1) { throw "Config value 'ultimate.targetKeywords' must contain at least one item." }
     if ($familyKeywords.Count -lt 1) { throw "Config value 'ultimate.familyKeywords' must contain at least one item." }
@@ -335,6 +355,9 @@ function Get-UltimateConfig {
     }
     if ($shareCode -notmatch '^\d+$') {
         throw "Config value 'ultimate.shareCode' must contain digits only."
+    }
+    if ($gamepadRightTriggerValue -lt 0 -or $gamepadRightTriggerValue -gt 255) {
+        throw "Config value 'ultimate.gamepadThrottle.rightTriggerValue' must be between 0 and 255."
     }
 
     [pscustomobject]@{
@@ -351,6 +374,7 @@ function Get-UltimateConfig {
         AfterTargetSelectDelayMilliseconds   = $afterTargetSelectDelayMilliseconds
         AfterTargetConfirmDelayMilliseconds  = $afterTargetConfirmDelayMilliseconds
         AfterAutoBuyCarDelayMilliseconds     = $afterAutoBuyCarDelayMilliseconds
+        WorkflowLoopCount                    = $workflowLoopCount
         SequenceLoopCount                    = $sequenceLoopCount
         SequenceEnterDelaySeconds            = $sequenceEnterDelaySeconds
         SequenceXDelayMilliseconds           = $sequenceXDelayMilliseconds
@@ -361,6 +385,9 @@ function Get-UltimateConfig {
         SearchSettleMilliseconds             = $searchSettleMilliseconds
         MaxSearchAttempts                    = $maxSearchAttempts
         VerticalScanSteps                    = $verticalScanSteps
+        GamepadThrottleEnabled               = $gamepadThrottleEnabled
+        GamepadRightTriggerValue             = $gamepadRightTriggerValue
+        GamepadDllPath                       = $gamepadDllPath
     }
 }
 
@@ -372,14 +399,19 @@ function Resolve-UltimateRuntimeOptions {
         [int]$SequenceLoopCount = -1,
         [int]$AutoBuyCarLoopCount = -1,
         [int]$FindNewSubaruLoopCount = -1,
-        [int]$StartFromStep = -1
+        [int]$StartFromStep = -1,
+        [int]$WorkflowLoopCount = -1
     )
 
     $resolvedStartupDelaySeconds = if ($StartupDelaySeconds -ge 0) { $StartupDelaySeconds } else { $Config.StartupDelaySeconds }
     $resolvedSequenceLoopCount = if ($SequenceLoopCount -ge 1) { $SequenceLoopCount } else { $Config.SequenceLoopCount }
+    # Whole-workflow repeat count. 0 = infinite, >=1 = fixed runs. -1 (CLI default) means
+    # "not supplied" -> fall back to config. 0 IS a valid supplied value, so guard on -ge 0.
+    $resolvedWorkflowLoopCount = if ($WorkflowLoopCount -ge 0) { $WorkflowLoopCount } else { $Config.WorkflowLoopCount }
 
     if ($resolvedStartupDelaySeconds -lt 0) { throw 'Ultimate startup delay cannot be negative.' }
     if ($resolvedSequenceLoopCount -lt 1) { throw 'Ultimate sequence loop count must be at least 1.' }
+    if ($resolvedWorkflowLoopCount -lt 0) { throw 'Ultimate workflow loop count cannot be negative (0 = infinite).' }
 
     # Debug aid: StartFromStep lets a later phase be tested in isolation. It matches the
     # top-level step numbers in ULTIMATE.md (5=Prelude ... 14=FindNewSubaru); steps 0-4 are
@@ -404,6 +436,7 @@ function Resolve-UltimateRuntimeOptions {
         AfterTargetSelectDelayMilliseconds  = $Config.AfterTargetSelectDelayMilliseconds
         AfterTargetConfirmDelayMilliseconds = $Config.AfterTargetConfirmDelayMilliseconds
         AfterAutoBuyCarDelayMilliseconds    = $Config.AfterAutoBuyCarDelayMilliseconds
+        WorkflowLoopCount                   = $resolvedWorkflowLoopCount
         SequenceLoopCount                   = $resolvedSequenceLoopCount
         SequenceEnterDelaySeconds           = $Config.SequenceEnterDelaySeconds
         SequenceXDelayMilliseconds          = $Config.SequenceXDelayMilliseconds
@@ -414,6 +447,9 @@ function Resolve-UltimateRuntimeOptions {
         SearchSettleMilliseconds            = $Config.SearchSettleMilliseconds
         MaxSearchAttempts                   = $Config.MaxSearchAttempts
         VerticalScanSteps                   = $Config.VerticalScanSteps
+        GamepadThrottleEnabled              = $Config.GamepadThrottleEnabled
+        GamepadRightTriggerValue            = $Config.GamepadRightTriggerValue
+        GamepadDllPath                      = $Config.GamepadDllPath
     }
 }
 
@@ -490,6 +526,139 @@ function Reset-UltimateAutoBuyCount {
     )
 
     return (Set-UltimateAutoBuyCount -Paths $Paths -Count 0)
+}
+
+function Format-UltimateDuration {
+    # Human-friendly duration. e.g. 3725 -> "1h 2m 5s", 65 -> "1m 5s", 8 -> "8s".
+    [CmdletBinding()]
+    param(
+        [double]$Seconds
+    )
+
+    if ($Seconds -lt 0) { $Seconds = 0 }
+    $total = [int][Math]::Round($Seconds)
+    $h = [int][Math]::Floor($total / 3600)
+    $m = [int][Math]::Floor(($total % 3600) / 60)
+    $s = $total % 60
+    $parts = @()
+    if ($h -gt 0) { $parts += ("{0}h" -f $h) }
+    if ($m -gt 0) { $parts += ("{0}m" -f $m) }
+    if ($s -gt 0 -or $parts.Count -eq 0) { $parts += ("{0}s" -f $s) }
+    return ($parts -join ' ')
+}
+
+function Get-UltimateEstimatedLoopSeconds {
+    # Rough estimate of ONE full Ultimate iteration (steps 5-14) in seconds, from the
+    # deterministic waits. The vision phases (target search, FindNewSubaru) are not
+    # time-deterministic, so they get coarse fixed allowances. The result is approximate and
+    # gets refined by measured per-loop timing once the first loop completes. Assumes a full
+    # run (StartFromStep=5); a debug StartFromStep>5 makes this an overestimate (measured fixes it).
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Options,
+        [Parameter(Mandatory = $true)]$AutoBuyCarOptions,
+        [Parameter(Mandatory = $true)]$FindNewSubaruOptions
+    )
+
+    $ms = 0.0
+
+    # Macro phases (5 Prelude, 7 AfterCode, 11 PostSequence, 13 PostBuy): sum of waits.
+    foreach ($stepSet in @($Options.PreludeSteps, $Options.AfterCodeSteps, $Options.PostSequenceSteps, $Options.PostBuySteps)) {
+        foreach ($step in @($stepSet)) { $ms += [double]$step.WaitMilliseconds }
+    }
+
+    # Step 6 share code: gaps between digits.
+    $digits = ([string]$Options.ShareCode).Length
+    if ($digits -gt 1) { $ms += ($digits - 1) * [double]$Options.DigitIntervalMilliseconds }
+
+    # Step 9 target confirm: the two post-select waits.
+    $ms += [double]$Options.AfterTargetSelectDelayMilliseconds
+    $ms += [double]$Options.AfterTargetConfirmDelayMilliseconds
+
+    # Step 10 Sequence loops: N * (Enter wait + 2*X wait + loop wait).
+    $perSequenceMs = ([double]$Options.SequenceEnterDelaySeconds * 1000) + (2 * [double]$Options.SequenceXDelayMilliseconds) + ([double]$Options.SequenceLoopDelaySeconds * 1000)
+    $ms += [double]$Options.SequenceLoopCount * $perSequenceMs
+
+    # Step 12->13 inter-phase settle delay.
+    $ms += [double]$Options.AfterAutoBuyCarDelayMilliseconds
+
+    # Step 12 AutoBuyCar: M loops of its steps + between-loop gaps.
+    $autoSteps = 0.0
+    foreach ($step in @($AutoBuyCarOptions.AutoBuyCarSteps)) { $autoSteps += [double]$step.WaitMilliseconds }
+    $m = [int]$AutoBuyCarOptions.LoopCount
+    if ($m -lt 1) { $m = 1 }
+    $ms += $m * $autoSteps
+    if ($m -gt 1) { $ms += ($m - 1) * [double]$AutoBuyCarOptions.AutoBuyCarBetweenLoopsMilliseconds }
+
+    # Coarse allowances for the vision phases (8 target search, 14 FindNewSubaru) - ~45s each.
+    $ms += 45000.0
+    $k = [int]$FindNewSubaruOptions.LoopCount
+    if ($k -lt 1) { $k = 1 }
+    $ms += $k * 45000.0
+
+    return ($ms / 1000.0)
+}
+
+function Set-UltimateProgress {
+    # Snapshot of outer-loop progress, written by the worker and read by the GUI to display
+    # the running loop count / ETA. Lives in runtime/ultimate-progress.json.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [int]$CurrentLoop = 0,
+        [int]$TotalLoops = 0,
+        [string]$DisplayText = '',
+        [string]$Updated = ''
+    )
+
+    Initialize-UltimateWorkspace -Paths $Paths
+    $obj = [pscustomobject]@{
+        status      = $Status
+        currentLoop = $CurrentLoop
+        totalLoops  = $TotalLoops
+        displayText = $DisplayText
+        updated     = $Updated
+    }
+    Set-Content -LiteralPath $Paths.ProgressPath -Value ($obj | ConvertTo-Json -Compress) -Encoding UTF8
+}
+
+function Get-UltimateProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths
+    )
+
+    if (-not (Test-Path -LiteralPath $Paths.ProgressPath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $Paths.ProgressPath -Raw -Encoding UTF8
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        $obj = $raw | ConvertFrom-Json
+        return [pscustomobject]@{
+            Status      = if (Test-UltimateConfigProperty -Object $obj -Name 'status') { [string]$obj.status } else { '' }
+            CurrentLoop = if (Test-UltimateConfigProperty -Object $obj -Name 'currentLoop') { [int]$obj.currentLoop } else { 0 }
+            TotalLoops  = if (Test-UltimateConfigProperty -Object $obj -Name 'totalLoops') { [int]$obj.totalLoops } else { 0 }
+            DisplayText = if (Test-UltimateConfigProperty -Object $obj -Name 'displayText') { [string]$obj.displayText } else { '' }
+            Updated     = if (Test-UltimateConfigProperty -Object $obj -Name 'updated') { [string]$obj.updated } else { '' }
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
+function Clear-UltimateProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths
+    )
+
+    if (Test-Path -LiteralPath $Paths.ProgressPath -PathType Leaf) {
+        Remove-Item -LiteralPath $Paths.ProgressPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-UltimateState {

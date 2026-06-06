@@ -110,6 +110,7 @@
     "afterTargetSelectDelayMilliseconds": 20000,
     "afterTargetConfirmDelayMilliseconds": 2000,
     "afterAutoBuyCarDelayMilliseconds": 2000,
+    "workflowLoopCount": 1,
     "sequenceLoopCount": 1,
     "sequence": {
       "enterDelaySeconds": 40,
@@ -128,6 +129,11 @@
     "searchKey": "Right",
     "searchSettleMilliseconds": 500,
     "maxSearchAttempts": 0,
-    "verticalScanSteps": 2
+    "verticalScanSteps": 2,
+    "gamepadThrottle": {
+      "enabled": true,
+      "rightTriggerValue": 255,
+      "dllPath": ""
+    }
   }
 }

@@ -36,7 +36,30 @@
 | 14 | **FindNewSubaru × K** | 复用 `automation.findNewSubaru`;次数 = GUI/`findNewSubaru.loopCount` | 找带「全新」徽章的目标斯巴鲁并买入 |
 | 15 | 收尾 | 代码 | `Release-AfkKeys`(抬起 W)+ 删除 PID |
 
-GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar loops**(第 12 步次数)、**FindNewSubaru loops**(第 14 步次数)、**Debug start step**(调试用,从第几步开始,见下「调试:从指定步骤开始」)。其余时序/宏改 config.json 或代码。
+GUI 上可直接设置的:**Ultimate loops**(整条流程重复几次,见下「整条流程循环」)、**Sequence loops**(第 10 步次数)、**AutoBuyCar loops**(第 12 步次数)、**FindNewSubaru loops**(第 14 步次数)、**Debug start step**(调试用,从第几步开始,见下「调试:从指定步骤开始」)。其余时序/宏改 config.json 或代码。
+
+> **整条流程(5–14 步)外面套了一层循环**:见下「整条流程循环 + 估计完成时间」。第 0–4 步(DPI、互斥、加载、启动倒计时、捕获前台窗口)只在最开始执行一次,循环只重复 5–14 步。
+
+---
+
+## 整条流程循环 + 估计完成时间(WorkflowLoopCount)
+
+整条 Ultimate 工作流(第 5–14 步)外面套了一层循环,可以**重复整条流程**。
+
+- **入口:**
+  - GUI「Ultimate」标签页的 **Ultimate loops** 数字框 = 重复次数;勾上旁边的 **Forever** = 无限循环(跑到按 Stop 为止)。
+  - CLI:`RunUltimate.ps1` / `StartUltimate.ps1` 的 `-WorkflowLoopCount <N>`(`0` = 无限,`>=1` = 次数)。
+  - 配置:`config.json` → `ultimate.workflowLoopCount`(默认 `1`,`0` = 无限)。
+- **每轮重复整条 5–14 步**(重输分享码、重新找车、刷 Sequence、买车、FindNewSubaru)。Prelude(Esc×4…)本来就是回菜单复位的动作,所以每轮能重新对齐状态。**第 0–4 步只在最开始执行一次**(尤其启动倒计时只倒一次),前台窗口句柄捕获一次、循环内复用。
+- **AutoBuyCar 累计买车数**在循环里持续累加(每轮的第 12 步都计数),所以无限循环会一直累加总数。
+- **估计完成时间(ETA):**
+  - 启动时按各阶段写死/可配的等待先算一个**每轮预估耗时**(`Get-UltimateEstimatedLoopSeconds`):宏 + 分享码 + 目标确认 + Sequence(大头,确定) + AutoBuyCar + Post-buy + 两个视觉阶段(目标搜索、FindNewSubaru)各给约 45s 的**粗略**估值。
+  - 每跑完一轮用**实测耗时**算平均并校准。
+  - **定次数**:状态栏/日志显示 `Loop x/N - avg M/loop, k left, ETA finish ~HH:mm (in …)`。
+  - **无限**:没有"完成时间",显示 `Loop x (infinite) - ~M/loop, running …`。
+  - 进度快照写入 `runtime/ultimate-progress.json`(`Set-/Get-/Clear-UltimateProgress`);worker 在每轮开始和结束各写一次,GUI 状态栏读它显示。`ultimate.log` 也每轮写 `Ultimate loop started/completed …`。
+- **DryRun + 无限**:为防止空跑刷爆日志,DryRun 时无限会被**限制为 1 轮**(日志里有 WARN 说明)。
+- 停止:`Stop` 用 `Stop-Process -Force` 直接杀进程;进度文件会停在最后一次快照,GUI 据进程状态显示 `(stopped) …`。
 
 ---
 
@@ -116,10 +139,17 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 
 | 按键 | 等待 |
 |---|---|
-| Enter | `sequence.enterDelaySeconds` = 40s |
+| Enter | `sequence.enterDelaySeconds` = 40s ←**这 40s 内按住手柄 RT(油门)前进** |
 | X | `sequence.xDelayMilliseconds` = 500ms |
 | X | 500ms |
 | Enter | `sequence.loopDelaySeconds` = 10s |
+
+> **40s 等待期间的手柄油门(虚拟手柄)**:Enter 按下后进入这段 40s 的"开车"等待,期间用 ViGEm 虚拟 Xbox 360 手柄把**右扳机(RT)按到底**让车一直前进,等待结束、按 X 之前松开油门。代码 `Invoke-UltimateThrottleWait`(`RunUltimate.ps1`)。
+> - 为什么用手柄:Forza 开车时**忽略 SendInput 注入的键盘**,纯键盘"按住 W"无效;Forza 原生读 XInput,虚拟手柄油门最稳。
+> - **手柄全程只连一次**:在第 2 步(启动阶段 `Connect-AfkGamepad`)插入虚拟手柄并**保持连接到整轮结束**,中途只改 RT 数值、不拔。这样游戏不会每圈都弹"手柄已断开"。正常结束/出错时 `Disconnect-AfkGamepad` 归零并拔出;被强制 Stop 时进程退出由系统自动拔出(此时游戏可能弹一次断开,属正常)。
+> - 关闭/调整:`config.json` → `ultimate.gamepadThrottle`(`enabled` 默认 `true`、`rightTriggerValue` 默认 `255`、`dllPath` 留空则自动找根目录的 `Nefarius.ViGEm.Client.dll`)。`enabled=false` 时退回纯等待。
+> - 依赖:ViGEmBus 驱动 + 根目录 `Nefarius.ViGEm.Client.dll`(详见下「虚拟手柄油门」)。
+> - ⚠️ 手柄全程连接时,游戏菜单提示会变成手柄图标;Ultimate 的菜单操作仍走键盘(分享码数字、Enter/X/S/D 等)。Forza 一般键鼠手柄并存可用,但若发现连接手柄后键盘菜单失灵,需要排查。
 
 ### 11. Post-sequence 宏(写死,48 步)
 `Get-DefaultUltimatePostSequenceSteps`。
@@ -201,6 +231,7 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 | `afterTargetSelectDelayMilliseconds` | 20000 | 选中后等待 |
 | `afterTargetConfirmDelayMilliseconds` | 2000 | 确认后等待 |
 | `afterAutoBuyCarDelayMilliseconds` | 2000 | 第 12 步(AutoBuyCar)与第 13 步(Post-buy 宏)之间的间隔 |
+| `workflowLoopCount` | 1 | 整条流程重复次数(0 = 无限;GUI「Ultimate loops」/「Forever」可覆盖) |
 | `sequenceLoopCount` | 80 | Sequence 次数默认(GUI 可覆盖) |
 | `sequence.enterDelaySeconds` | 40 | Sequence 内 Enter 后等待 |
 | `sequence.xDelayMilliseconds` | 500 | Sequence 内 X 后等待 |
@@ -211,9 +242,30 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 | `searchSettleMilliseconds` | 500 | 每次移动后等待 |
 | `maxSearchAttempts` | 0 | Left 次数上限,0 = 无限 |
 | `verticalScanSteps` | 2 | 向下扫的最大行数(到第 3 行) |
+| `gamepadThrottle.enabled` | `true` | 第 10 步 40s 等待期间是否用虚拟手柄按住 RT 前进 |
+| `gamepadThrottle.rightTriggerValue` | 255 | 右扳机油门值(0–255,255 = 踩到底) |
+| `gamepadThrottle.dllPath` | `""` | `Nefarius.ViGEm.Client.dll` 路径,留空自动找根目录 / `lib\` |
 
 AutoBuyCar 复用:`automation.autoBuyCar.{loopCount,betweenLoopsMilliseconds,steps}`。
 FindNewSubaru 复用:`automation.findNewSubaru.{loopCount,betweenLoopsMilliseconds,maxSearchAttempts,searchKey,searchSettleMilliseconds,afterSelectDelayMilliseconds,targetKeywords,newBadgeText,requireTargetConfirmation,verticalScanSteps}`(仅 `loopCount` 被 GUI 覆盖)。
+
+---
+
+## 虚拟手柄油门(ViGEm)
+
+第 10 步 Sequence 的 40s 等待期间靠**虚拟 Xbox 360 手柄按住右扳机(RT)**让车一直前进(纯键盘"按住 W"被 Forza 忽略,见上)。实现走 ViGEm:
+
+- **依赖(一次性)**
+  1. 装 **ViGEmBus 驱动**:<https://github.com/nefarius/ViGEmBus/releases>。现代签名驱动,**与 Win11 内存完整性(HVCI)兼容,不用关任何安全设置,通常免重启**。
+  2. 根目录放 **`Nefarius.ViGEm.Client.dll`**(来自官方 NuGet `Nefarius.ViGEm.Client`,单文件、原生库已内嵌、零依赖)。`gamepadThrottle.dllPath` 留空时自动在根目录 / `lib\` 找。
+  > 注:之前评估过 Interception 路线,但它是 2018 老过滤驱动,会被 Win11 内存完整性拦截、需先关 HVCI(降低系统安全);ViGEm 无此问题,故选 ViGEm。
+- **代码**:输入仍统一归 `AfkLib.ps1`。新增 `Connect-AfkGamepad` / `Set-AfkGamepadRightTrigger` / `Disconnect-AfkGamepad` / `Test-AfkGamepadConnected` / `Get-AfkGamepadDllPath`(均**惰性加载** DLL,GUI 等 dot-source 本文件但不连接时零开销)。`RunUltimate.ps1` 启动阶段 `Connect-AfkGamepad` 连一次、`finally` 里 `Disconnect-AfkGamepad`;`Invoke-UltimateThrottleWait` 在 40s 等待里按住/松开 RT。
+- **始终连接、避免断开弹窗**:手柄在一轮开始**只插一次**并保持到整轮结束,中途只改 RT 值(255↔0),**绝不中途拔**。这样游戏不会每圈弹"手柄已断开"。被强制 Stop 时进程退出由系统自动拔出(此时弹一次断开属正常)。
+- **DryRun**:不连接手柄,40s 等待只记日志(`Connect-AfkGamepad -DryRun` 返回 `$false`,`Invoke-UltimateThrottleWait` 走"未连接"分支)。
+- **关掉**:`config.json` → `ultimate.gamepadThrottle.enabled = false`,第 10 步退回纯 `Wait-UltimateSeconds`。
+- ⚠️ **键鼠/手柄并存**:手柄全程连着时,游戏提示图标会变手柄,但 Ultimate 菜单仍走键盘(分享码数字、Enter/X/S/D)。Forza 一般并存可用;若连手柄后键盘菜单失灵需排查(可考虑把菜单也改手柄,但当前未做)。
+
+> 改 ViGEmBus 之外的依赖名/路径或新增到发布包时记得同步 `BuildRelease.ps1` 的文件清单(`Nefarius.ViGEm.Client.dll` 目前不在清单里,发布前需补)。
 
 ---
 

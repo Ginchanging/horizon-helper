@@ -73,7 +73,11 @@ $rootFiles = @(
     'config.json',
     'README.md',
     'README.zh-CN.md',
-    'BLOG.zh-CN.md'
+    'BLOG.zh-CN.md',
+    # ViGEm client (native lib embedded) for the Ultimate gamepad throttle. Required because
+    # ultimate.gamepadThrottle.enabled defaults to true; without it the worker aborts at startup.
+    # The ViGEmBus driver is a separate, user-installed dependency (see README).
+    'Nefarius.ViGEm.Client.dll'
 )
 
 $scriptFiles = @(
