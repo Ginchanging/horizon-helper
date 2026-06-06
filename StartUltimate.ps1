@@ -3,6 +3,8 @@ param(
     [int]$StartupDelaySeconds = -1,
     [int]$SequenceLoopCount = -1,
     [int]$AutoBuyCarLoopCount = -1,
+    [int]$FindNewSubaruLoopCount = -1,
+    [int]$StartFromStep = -1,
     [string]$RecognitionImagePath,
     [switch]$AssumeTargetFound,
     [switch]$DryRun
@@ -17,7 +19,7 @@ $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Par
 $paths = Get-UltimatePaths -AppRoot $scriptRoot
 Initialize-UltimateWorkspace -Paths $paths
 $config = Get-UltimateConfig -AppRoot $scriptRoot
-$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount
+$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep
 
 $state = Get-UltimateState -Paths $paths
 if ($state.Status -in @('Running', 'RunningUnverified')) {
@@ -51,7 +53,9 @@ $argumentList = @(
     '-AppRoot', ('"{0}"' -f $scriptRoot),
     '-StartupDelaySeconds', ([string]$options.StartupDelaySeconds),
     '-SequenceLoopCount', ([string]$options.SequenceLoopCount),
-    '-AutoBuyCarLoopCount', ([string]$options.AutoBuyCarLoopCount)
+    '-AutoBuyCarLoopCount', ([string]$options.AutoBuyCarLoopCount),
+    '-FindNewSubaruLoopCount', ([string]$options.FindNewSubaruLoopCount),
+    '-StartFromStep', ([string]$options.StartFromStep)
 )
 if (-not [string]::IsNullOrWhiteSpace($RecognitionImagePath)) {
     $argumentList += @('-RecognitionImagePath', ('"{0}"' -f $RecognitionImagePath))
@@ -82,6 +86,9 @@ if ($newState -and $newState.Status -in @('Running', 'RunningUnverified')) {
     Write-Host "Target keywords: $($options.TargetKeywords -join ', ')"
     Write-Host "Sequence loops: $($options.SequenceLoopCount)"
     Write-Host "Sequence timing: EnterDelay=$($options.SequenceEnterDelaySeconds)s XDelay=$($options.SequenceXDelayMilliseconds)ms LoopDelay=$($options.SequenceLoopDelaySeconds)s"
+    if ($options.StartFromStep -gt 5) {
+        Write-Host "Debug: starting at step $($options.StartFromStep) (earlier steps skipped)."
+    }
     if ($DryRun) {
         Write-Host 'DryRun is enabled. No keys will be sent and waits are skipped.'
     }

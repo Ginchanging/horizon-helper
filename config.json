@@ -109,6 +109,7 @@
     "digitIntervalMilliseconds": 500,
     "afterTargetSelectDelayMilliseconds": 20000,
     "afterTargetConfirmDelayMilliseconds": 2000,
+    "afterAutoBuyCarDelayMilliseconds": 2000,
     "sequenceLoopCount": 1,
     "sequence": {
       "enterDelaySeconds": 40,
@@ -124,7 +125,7 @@
     "familyKeywords": [
       "斯巴"
     ],
-    "searchKey": "Left",
+    "searchKey": "Right",
     "searchSettleMilliseconds": 500,
     "maxSearchAttempts": 0,
     "verticalScanSteps": 2

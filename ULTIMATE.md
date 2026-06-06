@@ -6,8 +6,8 @@
 本文件描述 `Ultimate` 子系统从启动到结束的**完整、按顺序**的执行步骤。
 
 - 入口 worker:`scripts/RunUltimate.ps1`
-- 库:`scripts/UltimateLib.ps1`(三个写死的宏 + 配置/选项解析)、`scripts/AfkLib.ps1`(按键发送)、`scripts/AutomationLib.ps1`(截图/OCR/AutoBuyCar 复用)
-- 配置节:`config.json` → `ultimate`(以及 AutoBuyCar 复用的 `automation.autoBuyCar`)
+- 库:`scripts/UltimateLib.ps1`(四个写死的宏 + 配置/选项解析)、`scripts/AfkLib.ps1`(按键发送)、`scripts/AutomationLib.ps1`(截图/OCR、AutoBuyCar 步骤复用、FindNewSubaru 整段循环 `Invoke-AutomationFindNewSubaruLoop` 复用)
+- 配置节:`config.json` → `ultimate`(以及复用的 `automation.autoBuyCar`、`automation.findNewSubaru`)
 - 日志:`logs/ultimate.log`
 
 「写死(hard-coded)」= 直接写在 `*Lib.ps1` 代码里,**不读 config.json**,改它要改代码。
@@ -27,14 +27,30 @@
 | 5 | **Prelude 宏** | 写死 `Get-DefaultUltimatePreludeSteps` | 进入分享码输入界面 |
 | 6 | **输入分享码** | 可配置 `shareCode` / `digitIntervalMilliseconds` | 逐位输入 |
 | 7 | **After-code 宏** | 写死 `Get-DefaultUltimateAfterCodeSteps` | 确认 / 进入车辆列表 |
-| 8 | **目标搜索** | 可配置(见下) | Left 遍历 + 上下扫列找目标车 |
+| 8 | **目标搜索** | 可配置(见下) | Right 遍历 + 上下扫列找目标车 |
 | 9 | **目标确认** | 可配置 `afterTargetSelect*` / `afterTargetConfirm*` | Enter 选中 → 等待 → Enter 确认 |
 | 10 | **Sequence 循环 × N** | 可配置 `sequence.*`;次数 = GUI/`sequenceLoopCount` | 刷循环主体 |
 | 11 | **Post-sequence 宏** | 写死 `Get-DefaultUltimatePostSequenceSteps` | 48 步,卖车/回到列表等 |
 | 12 | **AutoBuyCar × M** | 复用 `automation.autoBuyCar` 步骤;次数 = GUI/`autoBuyCar.loopCount` | 买推荐车 |
-| 13 | 收尾 | 代码 | `Release-AfkKeys`(抬起 W)+ 删除 PID |
+| 13 | **Post-buy 宏** | 写死 `Get-DefaultUltimatePostBuySteps` | 16 步,退出购买界面、回到车展网格 |
+| 14 | **FindNewSubaru × K** | 复用 `automation.findNewSubaru`;次数 = GUI/`findNewSubaru.loopCount` | 找带「全新」徽章的目标斯巴鲁并买入 |
+| 15 | 收尾 | 代码 | `Release-AfkKeys`(抬起 W)+ 删除 PID |
 
-GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar loops**(第 12 步次数)。其余时序/宏改 config.json 或代码。
+GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar loops**(第 12 步次数)、**FindNewSubaru loops**(第 14 步次数)、**Debug start step**(调试用,从第几步开始,见下「调试:从指定步骤开始」)。其余时序/宏改 config.json 或代码。
+
+---
+
+## 调试:从指定步骤开始(StartFromStep)
+
+为方便调试/测试某个中段阶段,可以让 Ultimate **跳过前面的阶段、直接从某一步开始**。
+
+- **入口:**
+  - GUI「Ultimate」标签页的 **Debug start step** 数字框(范围 5–14,默认 **5 = 完整跑**)。
+  - CLI:`RunUltimate.ps1` / `StartUltimate.ps1` 的 `-StartFromStep <N>` 参数(同样默认完整跑)。
+- **编号对应上面的「顶层执行顺序」表**:`5`=Prelude、`6`=输入分享码、`7`=After-code、`8`=目标搜索、`9`=目标确认、`10`=Sequence、`11`=Post-sequence、`12`=AutoBuyCar、`13`=Post-buy、`14`=FindNewSubaru。
+- **第 0–4 步(基础设施:DPI 感知、互斥检查+写 PID、加载 WinForms、启动倒计时、捕获前台窗口句柄)永远执行**,不受 `StartFromStep` 影响。尤其**启动倒计时照常进行**,你仍有时间切到游戏窗口。
+- 实现:`Resolve-UltimateRuntimeOptions` 解析出 `StartFromStep`(<5 一律当 5;>14 抛错);worker 里每个阶段用 `Test-UltimateShouldRunStep -StepNumber N` 包一层,`StartFromStep > N` 的阶段被跳过并写一条 `WARN`:`Step N (Name) skipped because StartFromStep=...`。日志开头的 `Ultimate started ...` 行也带上 `StartFromStep=`。
+- **⚠️ 前提:从第 N 步开始,意味着游戏画面必须已经处于第 N 步所期望的 UI 状态**(例如从 14 开始,游戏需已停在车展网格;从 11 开始,需已在 Sequence 结束后的界面)。这是纯调试便利功能,不做任何状态校验。
 
 ---
 
@@ -60,7 +76,7 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 - `shareCode` = `705399298`(仅数字,校验 `^\d+$`)
 - 每位之间等待 `digitIntervalMilliseconds` = 500ms(最后一位后不等)
 
-### 7. After-code 宏(写死)
+### 7. After-code 宏(写死,27 步)
 确认 / 进入车辆列表。
 
 | # | 按键 | 等待 |
@@ -70,15 +86,17 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 | 3 | Enter | 5.0s |
 | 4 | Enter | 1.0s |
 | 5 | Enter | 2.0s |
-| 6 | A | 0.5s |
-| 7 | A | 0.5s |
+| 6 | Backspace | 1.0s |
+| 7–25 | S ×19 | 每次 0.5s |
+| 26 | D | 0.5s |
+| 27 | Enter | 1.0s |
 
 ### 8. 目标搜索(可配置)
 逻辑在 `Invoke-UltimateTargetSearch`:
 
-- 持续按 `searchKey` = `Left` 遍历车格,列表会从最左绕回末尾,走完一整圈(回到起始卡)就停。
-- 每按一次 `Left` 等待 `searchSettleMilliseconds` = 500ms,然后识别当前卡。
-- `maxSearchAttempts` = 0 → 不设次数上限(靠「绕一圈」检测停止);>0 则作为 Left 次数安全上限。
+- 持续按 `searchKey` = `Right` 遍历车格,列表会从一端绕回另一端,走完一整圈(回到起始卡)就停。(方向由配置决定,默认向右;日志里这一计数现在叫 `SearchPresses=`。)
+- 每按一次 `searchKey` 等待 `searchSettleMilliseconds` = 500ms,然后识别当前卡。
+- `maxSearchAttempts` = 0 → 不设次数上限(靠「绕一圈」检测停止);>0 则作为按键次数安全上限。
 - 只有当识别到**斯巴鲁家族**(`familyKeywords` = `斯巴`)时,才在当前列**向下扫** `verticalScanSteps` = 2 行(按 S),逐行识别;没中就按 W 退回去继续 Left。
 - 目标判定:OCR 文本需**同时包含** `targetKeywords` = `1998` + `斯巴` + `S1` + `790`(**精确**子串匹配,经 `ConvertTo-UltimateMatchKey` 容错归一化后)。
 - **OCR 容错靠字形折叠,不靠模糊匹配**:`ConvertTo-UltimateMatchKey` 把「形似数字的字母」折成数字——`i/l/|/! → 1`、`o → 0`、`g/q → 9`(再去标点)。于是 `790` 读成 `7g0`/`79o` 也能精确匹配 `790`,`S1` 读成 `SI` 也能匹配。**只折叠「字母→数字」,绝不折叠「数字→数字」**,所以两个不同的数不会互相串(`790`≠`990`、`1998`≠`1990`)——这点很关键:早期用过编辑距离 ≤1 的模糊匹配,结果把 `1990 斯巴鲁 Legacy` 误判成目标(1990≈1998、990≈790),已废弃。
@@ -115,7 +133,7 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 | 8 | Esc | 2.0s |
 | 9–14 | D ×6 | 每次 1.5s |
 | 15 | Enter | 1.5s |
-| 16 | Enter | 15.0s |
+| 16 | Enter | 20.0s |
 | 17 | S | 1.5s |
 | 18 | Enter | 1.0s |
 | 19 | D | 0.5s |
@@ -142,6 +160,33 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 
 循环之间等待 `automation.autoBuyCar.betweenLoopsMilliseconds` = 1.0s。
 
+**累计买车计数(持久化)**:每完成一次 AutoBuyCar 循环(= 买入 1 辆车),把累计总数 **+1** 写入 `runtime/ultimate-autobuy-count.txt`(ASCII)。该数**跨多次运行、跨 GUI 重启累加**,只有按 GUI 的 **Clear Count** 按钮才清零。GUI「Ultimate」标签页状态栏显示 `AutoBuyCar bought (total)=N`,刷新状态时更新;`ultimate.log` 每买一辆写一行 `AutoBuyCar bought a car. Loop=x/M CumulativeTotal=N`。
+- `DryRun` 不买车,**不计数**(不污染真实统计)。
+- Debug start step 跳过第 12 步(StartFromStep > 12)时,本阶段不执行,自然不计数。
+- 计数读写函数在 `UltimateLib.ps1`:`Get-/Set-/Add-/Reset-UltimateAutoBuyCount`;计数文件路径在 `Get-UltimatePaths` 的 `AutoBuyCountPath`。
+
+### 13. Post-buy 宏(写死,16 步)
+`Get-DefaultUltimatePostBuySteps`。在 AutoBuyCar 之后退出购买/车库界面,导航回车展网格,为 FindNewSubaru 扫描做准备。
+
+| # | 按键 | 等待 |
+|---|---|---|
+| 1–4 | Esc ×4 | 每次 2.0s |
+| 5–6 | D ×2 | 每次 1.0s |
+| 7 | S | 0.5s |
+| 8 | Enter | 1.0s |
+| 9–15 | S ×7 | 每次 0.5s |
+| 16 | Enter | 1.0s |
+
+> **第 12 ↔ 13 步之间的间隔**:AutoBuyCar 结束后、Post-buy 宏开始前,插入一段可配置等待 `afterAutoBuyCarDelayMilliseconds`(默认 **2000ms**),让购买界面稳定后再开始退出。仅当第 12 步实际执行时才等待(Debug start step 跳到 13 及以后会跳过这段等待)。代码在 `RunUltimate.ps1` 第 12、13 步之间。
+
+### 14. FindNewSubaru × K(复用 automation 配置)
+`Invoke-UltimateFindNewSubaru` → 直接调用 AutomationLib 抽出来的共享函数 `Invoke-AutomationFindNewSubaruLoop`(与 Automation 子系统的 FindNewSubaru **完全同一份实现**,不再重复代码)。
+
+- 行为、关键词、徽章检测、搜索/扫列时序全部取自 `config.json` → `automation.findNewSubaru`(以及 `automation` 顶层的 `inputMethod`/`keyTapHoldMilliseconds`),**仅循环次数**由 GUI「FindNewSubaru loops」设置(默认取 `automation.findNewSubaru.loopCount` = 1)。
+- 每个循环:按 `searchKey`(默认 `Left`)遍历车格 → 检测绿色高亮卡 → 判定「全新」徽章(黄色像素)+ 目标文字(默认 `1998`+`斯巴鲁`);若目标车出现但当前行无徽章,则向下扫 `verticalScanSteps` 行找带徽章的那辆。命中后 Enter 选中 → 等 `afterSelectDelayMilliseconds` → 跑一次 AFK MacroCombo(买车序列)。
+- 日志写入 `logs/ultimate.log`(传入的是 Ultimate 的 `$paths`),整段 Ultimate 流程日志连续。
+- **这是 CV 阶段**:需要真实桌面 + 游戏窗口;headless / 无游戏时会一直找不到,直到 `maxSearchAttempts` 上限后抛错。
+
 ---
 
 ## 配置项速查(`config.json` → `ultimate`)
@@ -155,18 +200,20 @@ GUI 上可直接设置的:**Sequence loops**(第 10 步次数)、**AutoBuyCar lo
 | `digitIntervalMilliseconds` | 500 | 分享码每位间隔 |
 | `afterTargetSelectDelayMilliseconds` | 20000 | 选中后等待 |
 | `afterTargetConfirmDelayMilliseconds` | 2000 | 确认后等待 |
+| `afterAutoBuyCarDelayMilliseconds` | 2000 | 第 12 步(AutoBuyCar)与第 13 步(Post-buy 宏)之间的间隔 |
 | `sequenceLoopCount` | 80 | Sequence 次数默认(GUI 可覆盖) |
 | `sequence.enterDelaySeconds` | 40 | Sequence 内 Enter 后等待 |
 | `sequence.xDelayMilliseconds` | 500 | Sequence 内 X 后等待 |
 | `sequence.loopDelaySeconds` | 10 | Sequence 末 Enter 后等待 |
 | `targetKeywords` | `1998,斯巴,S1,790` | 目标车严格关键词(全含才算中) |
 | `familyKeywords` | `斯巴` | 触发上下扫列的家族关键词 |
-| `searchKey` | `Left` | 横向遍历键 |
+| `searchKey` | `Right` | 横向遍历键(向右) |
 | `searchSettleMilliseconds` | 500 | 每次移动后等待 |
 | `maxSearchAttempts` | 0 | Left 次数上限,0 = 无限 |
 | `verticalScanSteps` | 2 | 向下扫的最大行数(到第 3 行) |
 
 AutoBuyCar 复用:`automation.autoBuyCar.{loopCount,betweenLoopsMilliseconds,steps}`。
+FindNewSubaru 复用:`automation.findNewSubaru.{loopCount,betweenLoopsMilliseconds,maxSearchAttempts,searchKey,searchSettleMilliseconds,afterSelectDelayMilliseconds,targetKeywords,newBadgeText,requireTargetConfirmation,verticalScanSteps}`(仅 `loopCount` 被 GUI 覆盖)。
 
 ---
 
@@ -194,6 +241,7 @@ OcrText='IMPREZA 22B · S 引 VERSIOI 传 奇 1998 斯 巴 鲁 SI 7g0'  Reason=M
 ---
 
 ## 改动须知
-- 三个宏写死在 `UltimateLib.ps1`:`Get-DefaultUltimatePreludeSteps` / `Get-DefaultUltimateAfterCodeSteps` / `Get-DefaultUltimatePostSequenceSteps`。改宏改这里,**并更新本文档对应表格**。
-- 加新阶段要同时改 worker 主流程顺序、可能的 `Resolve-UltimateRuntimeOptions` 选项、GUI、`StartUltimate.ps1`,以及本文档。
+- 四个宏写死在 `UltimateLib.ps1`:`Get-DefaultUltimatePreludeSteps` / `Get-DefaultUltimateAfterCodeSteps` / `Get-DefaultUltimatePostSequenceSteps` / `Get-DefaultUltimatePostBuySteps`。改宏改这里,**并更新本文档对应表格**。
+- FindNewSubaru 的整段循环是 `AutomationLib.ps1` 里的共享函数 `Invoke-AutomationFindNewSubaruLoop`(Automation 与 Ultimate 共用)。改 FindNewSubaru 行为只改这一处,两边同时生效。
+- 加新阶段要同时改 worker 主流程顺序、可能的 `Resolve-UltimateRuntimeOptions` 选项、GUI、`StartUltimate.ps1`,以及本文档。**新阶段也要用 `Test-UltimateShouldRunStep -StepNumber N` 包一层**(N = 它在顶层表里的步号),否则 Debug start step 跳不过/跳不到它;同时更新上面「调试」一节的编号对应表。
 - 本文档未列入 `BuildRelease.ps1` 的发布清单(内部规格文档,不随发布包分发)。如需随包分发,把 `ULTIMATE.md` 加进 `$rootFiles`。

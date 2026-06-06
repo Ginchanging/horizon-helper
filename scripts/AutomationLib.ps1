@@ -1143,3 +1143,151 @@ function Invoke-AutomationKeySteps {
         }
     }
 }
+
+function Invoke-AutomationPostMatchMacroCombo {
+    # After FindNewSubaru selects a new target car, run the AFK MacroCombo (the buy
+    # sequence) once. Shared by the Automation worker and the Ultimate worker.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][string]$AppRoot,
+        [int]$LoopIndex = 1,
+        [ValidateSet('SendKeys', 'SendInputScanCode', 'SendInputVirtualKey')][string]$InputMethod = 'SendKeys',
+        [switch]$DryRun
+    )
+
+    $afkConfig = Get-AfkConfig -AppRoot $AppRoot
+    $afkOptions = Resolve-AfkRuntimeOptions -Config $afkConfig
+    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "MacroCombo started after match. Loop=$LoopIndex Steps=$(@($afkOptions.MacroComboSteps).Count)"
+    Invoke-AutomationKeySteps -Paths $Paths -Steps $afkOptions.MacroComboSteps -Mode 'MacroComboAfterMatch' -LoopIndex $LoopIndex -KeyTapHoldMilliseconds $afkOptions.KeyTapHoldMilliseconds -InputMethod $InputMethod -DryRun:$DryRun
+    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "MacroCombo completed after match. Loop=$LoopIndex"
+}
+
+function Invoke-AutomationFindNewSubaruLoop {
+    # The full FindNewSubaru computer-vision loop: traverse the grid with the search key,
+    # detect the green-highlighted card, confirm the new-badge + target text, scan the
+    # column vertically when the target is found without a badge, select it, and run the
+    # post-match MacroCombo. Shared by RunAutomation.ps1 (Automation subsystem) and
+    # RunUltimate.ps1 (Ultimate's FindNewSubaru tail). $Options is a Resolve-AutomationRuntimeOptions
+    # result for Mode='FindNewSubaru'; $Paths decides which log/runtime dir is used.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)]$Options,
+        [string]$RecognitionImagePath,
+        [switch]$DryRun
+    )
+
+    $targetWindow = 0
+    if ([string]::IsNullOrWhiteSpace($RecognitionImagePath)) {
+        $targetWindow = Get-AutomationForegroundWindowHandle
+        if ($targetWindow -eq 0) {
+            throw 'Could not find a foreground window for automation.'
+        }
+        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Foreground target captured. Handle=0x$('{0:X}' -f $targetWindow)"
+    }
+    else {
+        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Using recognition image path instead of live window. Path=$RecognitionImagePath"
+    }
+
+    $tempRoot = Join-Path $Paths.RuntimeRoot 'automation-ocr'
+    for ($loop = 1; $loop -le $Options.LoopCount; $loop++) {
+        $matched = $false
+        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop started. Loop=$loop Total=$($Options.LoopCount)"
+
+        for ($attempt = 1; $attempt -le $Options.FindNewSubaruMaxSearchAttempts; $attempt++) {
+            $searchSendResult = Send-AfkNamedKeyTap -Key $Options.FindNewSubaruSearchKey -HoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $Options.InputMethod -DryRun:$DryRun
+            Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Search key sent. Loop=$loop Attempt=$attempt Key=$($Options.FindNewSubaruSearchKey) InputMethod=$($searchSendResult.Method) Extended=$($searchSendResult.ExtendedKey) DownResult=$($searchSendResult.DownResult) UpResult=$($searchSendResult.UpResult) DryRun=$DryRun"
+            if ($Options.FindNewSubaruSearchSettleMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $Options.FindNewSubaruSearchSettleMilliseconds
+            }
+
+            $recognition = Test-AutomationSelectedCar `
+                -WindowHandle $targetWindow `
+                -ImagePath $RecognitionImagePath `
+                -TargetKeywords $Options.FindNewSubaruTargetKeywords `
+                -NewBadgeText $Options.FindNewSubaruNewBadgeText `
+                -RequireTargetConfirmation $Options.FindNewSubaruRequireTargetConfirmation `
+                -TempRoot $tempRoot
+
+            Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Recognition result. Loop=$loop Attempt=$attempt Match=$($recognition.Match) Stop=$($recognition.Stop) New=$($recognition.HasNewBadge) IsTargetWithoutBadge=$($recognition.IsTargetWithoutBadge) OcrSuccess=$($recognition.OcrSuccess) MatchMode=$($recognition.MatchMode) Reason=$($recognition.Reason)"
+
+            if (-not $recognition.Match -and $recognition.IsTargetWithoutBadge -and $Options.FindNewSubaruVerticalScanSteps -gt 0) {
+                Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Target car found without new badge, scanning down. Loop=$loop Attempt=$attempt MaxRows=$($Options.FindNewSubaruVerticalScanSteps)"
+                $scanned = 0
+                for ($vs = 1; $vs -le $Options.FindNewSubaruVerticalScanSteps; $vs++) {
+                    $vSendResult = Send-AfkNamedKeyTap -Key 'S' -HoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $Options.InputMethod -DryRun:$DryRun
+                    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Vertical scan key S sent. Loop=$loop Attempt=$attempt VS=$vs InputMethod=$($vSendResult.Method) DownResult=$($vSendResult.DownResult) UpResult=$($vSendResult.UpResult) DryRun=$DryRun"
+                    if ($Options.FindNewSubaruSearchSettleMilliseconds -gt 0) {
+                        Start-Sleep -Milliseconds $Options.FindNewSubaruSearchSettleMilliseconds
+                    }
+                    $scanned++
+
+                    $vRecognition = Test-AutomationSelectedCar `
+                        -WindowHandle $targetWindow `
+                        -ImagePath $RecognitionImagePath `
+                        -TargetKeywords $Options.FindNewSubaruTargetKeywords `
+                        -NewBadgeText $Options.FindNewSubaruNewBadgeText `
+                        -RequireTargetConfirmation $Options.FindNewSubaruRequireTargetConfirmation `
+                        -TempRoot $tempRoot
+                    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Vertical scan recognition. Loop=$loop Attempt=$attempt VS=$vs Match=$($vRecognition.Match) New=$($vRecognition.HasNewBadge) IsTargetWithoutBadge=$($vRecognition.IsTargetWithoutBadge) OcrSuccess=$($vRecognition.OcrSuccess) MatchMode=$($vRecognition.MatchMode) OcrText='$($vRecognition.OcrText)' Reason=$($vRecognition.Reason)"
+
+                    if ($vRecognition.Match -or $vRecognition.HasNewBadge) {
+                        $enterSendResult = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $Options.InputMethod -DryRun:$DryRun
+                        $vsSelectMode = if ($vRecognition.Match) { 'FullMatch' } else { 'BadgeOnly' }
+                        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Vertical scan matched new target car. Enter sent. Loop=$loop Attempt=$attempt VS=$vs SelectMode=$vsSelectMode InputMethod=$($enterSendResult.Method) DownResult=$($enterSendResult.DownResult) UpResult=$($enterSendResult.UpResult) DryRun=$DryRun"
+                        if ($Options.FindNewSubaruAfterSelectDelayMilliseconds -gt 0) {
+                            Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "After-select delay $($Options.FindNewSubaruAfterSelectDelayMilliseconds)ms. Loop=$loop Attempt=$attempt VS=$vs"
+                            Start-Sleep -Milliseconds $Options.FindNewSubaruAfterSelectDelayMilliseconds
+                        }
+                        Invoke-AutomationPostMatchMacroCombo -Paths $Paths -AppRoot $Paths.AppRoot -LoopIndex $loop -InputMethod $Options.InputMethod -DryRun:$DryRun
+                        $matched = $true
+                        break
+                    }
+
+                    if ($vRecognition.Stop) {
+                        throw $vRecognition.Reason
+                    }
+                }
+
+                if (-not $matched) {
+                    for ($i = 0; $i -lt $scanned; $i++) {
+                        Send-AfkNamedKeyTap -Key 'W' -HoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $Options.InputMethod -DryRun:$DryRun | Out-Null
+                        if ($Options.FindNewSubaruSearchSettleMilliseconds -gt 0) {
+                            Start-Sleep -Milliseconds $Options.FindNewSubaruSearchSettleMilliseconds
+                        }
+                    }
+                    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Vertical scan found no new match. Returned $scanned row(s) up. Loop=$loop Attempt=$attempt"
+                }
+
+                if ($matched) { break }
+            }
+
+            if ($recognition.Match) {
+                $enterSendResult = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $Options.InputMethod -DryRun:$DryRun
+                Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Matched new target car. Enter sent. Loop=$loop Attempt=$attempt InputMethod=$($enterSendResult.Method) DownResult=$($enterSendResult.DownResult) UpResult=$($enterSendResult.UpResult) DryRun=$DryRun"
+                if ($Options.FindNewSubaruAfterSelectDelayMilliseconds -gt 0) {
+                    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "After-select delay $($Options.FindNewSubaruAfterSelectDelayMilliseconds)ms. Loop=$loop Attempt=$attempt"
+                    Start-Sleep -Milliseconds $Options.FindNewSubaruAfterSelectDelayMilliseconds
+                }
+                Invoke-AutomationPostMatchMacroCombo -Paths $Paths -AppRoot $Paths.AppRoot -LoopIndex $loop -InputMethod $Options.InputMethod -DryRun:$DryRun
+                $matched = $true
+                break
+            }
+
+            if ($recognition.Stop) {
+                throw $recognition.Reason
+            }
+        }
+
+        if (-not $matched) {
+            throw "FindNewSubaru did not find a confirmed new target car within $($Options.FindNewSubaruMaxSearchAttempts) attempts. Loop=$loop"
+        }
+
+        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop completed. Loop=$loop Total=$($Options.LoopCount)"
+        if ($loop -lt $Options.LoopCount -and $Options.FindNewSubaruBetweenLoopsMilliseconds -gt 0) {
+            Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Between-loop delay $($Options.FindNewSubaruBetweenLoopsMilliseconds)ms. Loop=$loop"
+            Start-Sleep -Milliseconds $Options.FindNewSubaruBetweenLoopsMilliseconds
+        }
+    }
+}

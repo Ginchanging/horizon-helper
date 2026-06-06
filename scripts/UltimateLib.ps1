@@ -22,11 +22,12 @@ function Get-UltimatePaths {
     $logsRoot = Join-Path $root 'logs'
 
     [pscustomobject]@{
-        AppRoot     = $root
-        RuntimeRoot = $runtimeRoot
-        LogsRoot    = $logsRoot
-        PidPath     = Join-Path $runtimeRoot 'ultimate.pid'
-        LogPath     = Join-Path $logsRoot 'ultimate.log'
+        AppRoot          = $root
+        RuntimeRoot      = $runtimeRoot
+        LogsRoot         = $logsRoot
+        PidPath          = Join-Path $runtimeRoot 'ultimate.pid'
+        LogPath          = Join-Path $logsRoot 'ultimate.log'
+        AutoBuyCountPath = Join-Path $runtimeRoot 'ultimate-autobuy-count.txt'
     }
 }
 
@@ -126,8 +127,28 @@ function Get-DefaultUltimateAfterCodeSteps {
         [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 5000 },
         [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
         [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 2000 },
-        [pscustomobject]@{ Key = 'A'; WaitMilliseconds = 500 },
-        [pscustomobject]@{ Key = 'A'; WaitMilliseconds = 500 }
+        [pscustomobject]@{ Key = 'Backspace'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'D'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 }
     )
 }
 
@@ -148,7 +169,7 @@ function Get-DefaultUltimatePostSequenceSteps {
         [pscustomobject]@{ Key = 'D'; WaitMilliseconds = 1500 },
         [pscustomobject]@{ Key = 'D'; WaitMilliseconds = 1500 },
         [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1500 },
-        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 15000 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 20000 },
         [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 1500 },
         [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
         [pscustomobject]@{ Key = 'D'; WaitMilliseconds = 500 },
@@ -184,6 +205,30 @@ function Get-DefaultUltimatePostSequenceSteps {
     )
 }
 
+function Get-DefaultUltimatePostBuySteps {
+    # Runs after the AutoBuyCar tail, to back out of the purchase screens and navigate
+    # to the autoshow grid so the FindNewSubaru phase can start scanning. Hard-coded here
+    # (not read from config.json), like the other Ultimate macros.
+    @(
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 2000 },
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 2000 },
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 2000 },
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 2000 },
+        [pscustomobject]@{ Key = 'D'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'D'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 }
+    )
+}
+
 function Get-UltimateConfig {
     [CmdletBinding()]
     param(
@@ -200,6 +245,9 @@ function Get-UltimateConfig {
     $digitIntervalMilliseconds = 500
     $afterTargetSelectDelayMilliseconds = 20000
     $afterTargetConfirmDelayMilliseconds = 2000
+    # Pause inserted between the AutoBuyCar phase (step 12) and the Post-buy macro (step 13)
+    # so the purchase screens have time to settle before the macro backs out of them.
+    $afterAutoBuyCarDelayMilliseconds = 2000
     $sequenceLoopCount = 80
     $sequenceEnterDelaySeconds = 40
     $sequenceXDelayMilliseconds = 500
@@ -218,7 +266,7 @@ function Get-UltimateConfig {
     $familyKeywords = @(
         ([string]([char]0x65AF) + [string]([char]0x5DF4))
     )
-    $searchKey = 'Left'
+    $searchKey = 'Right'
     $searchSettleMilliseconds = 500
     $maxSearchAttempts = 50
     $verticalScanSteps = 2
@@ -235,6 +283,7 @@ function Get-UltimateConfig {
             $digitIntervalMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'digitIntervalMilliseconds' -DefaultValue $digitIntervalMilliseconds
             $afterTargetSelectDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterTargetSelectDelayMilliseconds' -DefaultValue $afterTargetSelectDelayMilliseconds
             $afterTargetConfirmDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterTargetConfirmDelayMilliseconds' -DefaultValue $afterTargetConfirmDelayMilliseconds
+            $afterAutoBuyCarDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterAutoBuyCarDelayMilliseconds' -DefaultValue $afterAutoBuyCarDelayMilliseconds
             $sequenceLoopCount = Get-UltimateConfigIntValue -Object $ultimate -Name 'sequenceLoopCount' -DefaultValue $sequenceLoopCount
             $searchKey = Normalize-AfkKeyName -Key (Get-UltimateConfigStringValue -Object $ultimate -Name 'searchKey' -DefaultValue $searchKey)
             $searchSettleMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'searchSettleMilliseconds' -DefaultValue $searchSettleMilliseconds
@@ -264,6 +313,7 @@ function Get-UltimateConfig {
         @{ Name = 'ultimate.digitIntervalMilliseconds'; Value = $digitIntervalMilliseconds },
         @{ Name = 'ultimate.afterTargetSelectDelayMilliseconds'; Value = $afterTargetSelectDelayMilliseconds },
         @{ Name = 'ultimate.afterTargetConfirmDelayMilliseconds'; Value = $afterTargetConfirmDelayMilliseconds },
+        @{ Name = 'ultimate.afterAutoBuyCarDelayMilliseconds'; Value = $afterAutoBuyCarDelayMilliseconds },
         @{ Name = 'ultimate.sequence.enterDelaySeconds'; Value = $sequenceEnterDelaySeconds },
         @{ Name = 'ultimate.sequence.xDelayMilliseconds'; Value = $sequenceXDelayMilliseconds },
         @{ Name = 'ultimate.sequence.loopDelaySeconds'; Value = $sequenceLoopDelaySeconds },
@@ -295,10 +345,12 @@ function Get-UltimateConfig {
         PreludeSteps                         = @(Get-DefaultUltimatePreludeSteps)
         AfterCodeSteps                       = @(Get-DefaultUltimateAfterCodeSteps)
         PostSequenceSteps                    = @(Get-DefaultUltimatePostSequenceSteps)
+        PostBuySteps                         = @(Get-DefaultUltimatePostBuySteps)
         ShareCode                            = $shareCode
         DigitIntervalMilliseconds            = $digitIntervalMilliseconds
         AfterTargetSelectDelayMilliseconds   = $afterTargetSelectDelayMilliseconds
         AfterTargetConfirmDelayMilliseconds  = $afterTargetConfirmDelayMilliseconds
+        AfterAutoBuyCarDelayMilliseconds     = $afterAutoBuyCarDelayMilliseconds
         SequenceLoopCount                    = $sequenceLoopCount
         SequenceEnterDelaySeconds            = $sequenceEnterDelaySeconds
         SequenceXDelayMilliseconds           = $sequenceXDelayMilliseconds
@@ -318,7 +370,9 @@ function Resolve-UltimateRuntimeOptions {
         [Parameter(Mandatory = $true)]$Config,
         [int]$StartupDelaySeconds = -1,
         [int]$SequenceLoopCount = -1,
-        [int]$AutoBuyCarLoopCount = -1
+        [int]$AutoBuyCarLoopCount = -1,
+        [int]$FindNewSubaruLoopCount = -1,
+        [int]$StartFromStep = -1
     )
 
     $resolvedStartupDelaySeconds = if ($StartupDelaySeconds -ge 0) { $StartupDelaySeconds } else { $Config.StartupDelaySeconds }
@@ -327,6 +381,13 @@ function Resolve-UltimateRuntimeOptions {
     if ($resolvedStartupDelaySeconds -lt 0) { throw 'Ultimate startup delay cannot be negative.' }
     if ($resolvedSequenceLoopCount -lt 1) { throw 'Ultimate sequence loop count must be at least 1.' }
 
+    # Debug aid: StartFromStep lets a later phase be tested in isolation. It matches the
+    # top-level step numbers in ULTIMATE.md (5=Prelude ... 14=FindNewSubaru); steps 0-4 are
+    # infrastructure (DPI, mutual-exclusion, window capture, startup countdown) and always
+    # run. -1/0/<5 means "no skipping" -> start from the first phase (full run).
+    $resolvedStartFromStep = if ($StartFromStep -ge 5) { $StartFromStep } else { 5 }
+    if ($resolvedStartFromStep -gt 14) { throw 'Ultimate StartFromStep must be between 5 and 14 (matches the ULTIMATE.md step table).' }
+
     [pscustomobject]@{
         StartupDelaySeconds                 = $resolvedStartupDelaySeconds
         InputMethod                         = $Config.InputMethod
@@ -334,11 +395,15 @@ function Resolve-UltimateRuntimeOptions {
         PreludeSteps                        = @($Config.PreludeSteps)
         AfterCodeSteps                      = @($Config.AfterCodeSteps)
         PostSequenceSteps                   = @($Config.PostSequenceSteps)
+        PostBuySteps                        = @($Config.PostBuySteps)
         AutoBuyCarLoopCount                 = $AutoBuyCarLoopCount
+        FindNewSubaruLoopCount              = $FindNewSubaruLoopCount
+        StartFromStep                       = $resolvedStartFromStep
         ShareCode                           = $Config.ShareCode
         DigitIntervalMilliseconds           = $Config.DigitIntervalMilliseconds
         AfterTargetSelectDelayMilliseconds  = $Config.AfterTargetSelectDelayMilliseconds
         AfterTargetConfirmDelayMilliseconds = $Config.AfterTargetConfirmDelayMilliseconds
+        AfterAutoBuyCarDelayMilliseconds    = $Config.AfterAutoBuyCarDelayMilliseconds
         SequenceLoopCount                   = $resolvedSequenceLoopCount
         SequenceEnterDelaySeconds           = $Config.SequenceEnterDelaySeconds
         SequenceXDelayMilliseconds          = $Config.SequenceXDelayMilliseconds
@@ -371,6 +436,60 @@ function Remove-UltimatePid {
     if (Test-Path -LiteralPath $Paths.PidPath -PathType Leaf) {
         Remove-Item -LiteralPath $Paths.PidPath -Force
     }
+}
+
+function Get-UltimateAutoBuyCount {
+    # Cumulative number of cars the Ultimate AutoBuyCar phase has bought, persisted in
+    # runtime/ so it survives across runs and GUI restarts. Reset only via the GUI Clear
+    # button (Reset-UltimateAutoBuyCount). Returns 0 when the file is missing/unreadable.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths
+    )
+
+    if (-not (Test-Path -LiteralPath $Paths.AutoBuyCountPath -PathType Leaf)) {
+        return 0
+    }
+
+    $text = (Get-Content -LiteralPath $Paths.AutoBuyCountPath -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $value = 0
+    if ([int]::TryParse(([string]$text).Trim(), [ref]$value) -and $value -ge 0) {
+        return $value
+    }
+    return 0
+}
+
+function Set-UltimateAutoBuyCount {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][int]$Count
+    )
+
+    Initialize-UltimateWorkspace -Paths $Paths
+    if ($Count -lt 0) { $Count = 0 }
+    Set-Content -LiteralPath $Paths.AutoBuyCountPath -Value ([string]$Count) -Encoding ASCII
+    return $Count
+}
+
+function Add-UltimateAutoBuyCount {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [int]$Count = 1
+    )
+
+    $current = Get-UltimateAutoBuyCount -Paths $Paths
+    return (Set-UltimateAutoBuyCount -Paths $Paths -Count ($current + $Count))
+}
+
+function Reset-UltimateAutoBuyCount {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths
+    )
+
+    return (Set-UltimateAutoBuyCount -Paths $Paths -Count 0)
 }
 
 function Get-UltimateState {

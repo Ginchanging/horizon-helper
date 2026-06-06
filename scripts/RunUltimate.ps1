@@ -4,6 +4,8 @@ param(
     [int]$StartupDelaySeconds = -1,
     [int]$SequenceLoopCount = -1,
     [int]$AutoBuyCarLoopCount = -1,
+    [int]$FindNewSubaruLoopCount = -1,
+    [int]$StartFromStep = -1,
     [string]$RecognitionImagePath,
     [switch]$AssumeTargetFound,
     [switch]$DryRun
@@ -37,9 +39,10 @@ $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Par
 $paths = Get-UltimatePaths -AppRoot $AppRoot
 Initialize-UltimateWorkspace -Paths $paths
 $config = Get-UltimateConfig -AppRoot $paths.AppRoot
-$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount
+$options = Resolve-UltimateRuntimeOptions -Config $config -StartupDelaySeconds $StartupDelaySeconds -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep
 $automationConfig = Get-AutomationConfig -AppRoot $paths.AppRoot
 $autoBuyCarOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'AutoBuyCar' -LoopCount $options.AutoBuyCarLoopCount
+$findNewSubaruOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'FindNewSubaru' -LoopCount $options.FindNewSubaruLoopCount
 
 function Wait-UltimateMilliseconds {
     param(
@@ -59,6 +62,23 @@ function Wait-UltimateSeconds {
     if ($Seconds -gt 0 -and -not $DryRun) {
         Start-Sleep -Seconds $Seconds
     }
+}
+
+function Test-UltimateShouldRunStep {
+    # Debug aid: when StartFromStep > N, top-level phase N is skipped so a later phase can be
+    # tested in isolation. StartFromStep numbering matches the step table in ULTIMATE.md
+    # (5=Prelude ... 14=FindNewSubaru). The infrastructure steps (0-4: DPI, mutual-exclusion,
+    # foreground-window capture, startup countdown) are NOT gated here and always run.
+    param(
+        [Parameter(Mandatory = $true)][int]$StepNumber,
+        [Parameter(Mandatory = $true)][string]$StepName
+    )
+
+    if ($options.StartFromStep -le $StepNumber) {
+        return $true
+    }
+    Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Step $StepNumber ($StepName) skipped because StartFromStep=$($options.StartFromStep) (debug)."
+    return $false
 }
 
 function Invoke-UltimateKeySteps {
@@ -127,40 +147,40 @@ function Invoke-UltimateTargetSearch {
         throw "Ultimate target was not matched in static image. Reason=$($staticRecognition.Reason)"
     }
 
-    # Traverse the car grid by pressing the search key (Left) continuously. The game
-    # wraps from the leftmost card back to the end of the list, so a steady stream of
-    # Left presses eventually visits every card and returns to where we started. We
+    # Traverse the car grid by pressing the search key ($options.SearchKey, default Right)
+    # continuously. The game wraps from the end of the row back around the list, so a steady
+    # stream of presses eventually visits every card and returns to where we started. We
     # stop after exactly one full loop (the starting card comes back into view), rather
     # than after a fixed number of attempts. We only move vertically (S/W) once a Subaru
     # card is detected, then scan that column for the exact target. Doing the vertical
     # scan unconditionally on every step is what previously drifted the cursor off the
     # list (onto the "Buy Recommended Car" header) and made it bounce between two cards.
     #
-    # MaxSearchAttempts is now an optional safety cap on the number of Left presses:
+    # MaxSearchAttempts is now an optional safety cap on the number of search presses:
     # 0 (the default) means unlimited / rely purely on the full-loop detection.
     $loopAnchor = $null      # canonical OCR text of the card we started on
     $anchorArmed = $false    # becomes true once we have moved off the starting card
     $seen = @{}              # every distinct card signature we have visited
     $staleStreak = 0         # consecutive presses that only revisited already-seen cards
     $staleLimit = 10         # backstop for a frozen cursor / single-card list
-    $leftPresses = 0
+    $searchPresses = 0
     $first = $true
 
     while ($true) {
         if (-not $first) {
-            if ($options.MaxSearchAttempts -gt 0 -and $leftPresses -ge $options.MaxSearchAttempts) {
-                throw "Ultimate target was not found within $($options.MaxSearchAttempts) Left presses (safety cap)."
+            if ($options.MaxSearchAttempts -gt 0 -and $searchPresses -ge $options.MaxSearchAttempts) {
+                throw "Ultimate target was not found within $($options.MaxSearchAttempts) search presses (safety cap)."
             }
             $searchSendResult = Send-AfkNamedKeyTap -Key $options.SearchKey -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
-            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Search key sent. LeftPresses=$($leftPresses + 1) Key=$($options.SearchKey) InputMethod=$($searchSendResult.Method) DownResult=$($searchSendResult.DownResult) UpResult=$($searchSendResult.UpResult) DryRun=$DryRun"
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Search key sent. SearchPresses=$($searchPresses + 1) Key=$($options.SearchKey) InputMethod=$($searchSendResult.Method) DownResult=$($searchSendResult.DownResult) UpResult=$($searchSendResult.UpResult) DryRun=$DryRun"
             Wait-UltimateMilliseconds -Milliseconds $options.SearchSettleMilliseconds
-            $leftPresses++
+            $searchPresses++
         }
         $first = $false
 
-        $recognition = Test-UltimateCurrentTarget -TargetWindow $TargetWindow -Label "LeftPresses=$leftPresses Row=0"
+        $recognition = Test-UltimateCurrentTarget -TargetWindow $TargetWindow -Label "SearchPresses=$searchPresses Row=0"
         if ($recognition.Match) {
-            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Target matched. LeftPresses=$leftPresses Row=0"
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Target matched. SearchPresses=$searchPresses Row=0"
             return
         }
 
@@ -173,7 +193,7 @@ function Invoke-UltimateTargetSearch {
                 Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Loop anchor set. Signature='$signature'"
             }
             elseif ($anchorArmed -and $signature -eq $loopAnchor) {
-                throw "Ultimate target was not found after scanning the whole list once (returned to the starting car after $leftPresses Left presses)."
+                throw "Ultimate target was not found after scanning the whole list once (returned to the starting car after $searchPresses search presses)."
             }
             elseif (-not $anchorArmed -and $signature -ne $loopAnchor) {
                 $anchorArmed = $true
@@ -194,24 +214,24 @@ function Invoke-UltimateTargetSearch {
             }
         }
 
-        # Not a Subaru card: keep traversing Left, no vertical movement.
+        # Not a Subaru card: keep traversing horizontally, no vertical movement.
         if (-not $recognition.IsFamily) {
             continue
         }
 
         # Subaru detected but not the exact target yet: scan this column up/down.
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Subaru detected, scanning column. LeftPresses=$leftPresses MaxRows=$($options.VerticalScanSteps)"
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Subaru detected, scanning column. SearchPresses=$searchPresses MaxRows=$($options.VerticalScanSteps)"
         $scannedRows = 0
         $matchedInColumn = $false
         for ($row = 1; $row -le $options.VerticalScanSteps; $row++) {
             $downResult = Send-AfkNamedKeyTap -Key 'S' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
-            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Vertical scan key sent. LeftPresses=$leftPresses Row=$row Key=S InputMethod=$($downResult.Method) DownResult=$($downResult.DownResult) UpResult=$($downResult.UpResult) DryRun=$DryRun"
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Vertical scan key sent. SearchPresses=$searchPresses Row=$row Key=S InputMethod=$($downResult.Method) DownResult=$($downResult.DownResult) UpResult=$($downResult.UpResult) DryRun=$DryRun"
             Wait-UltimateMilliseconds -Milliseconds $options.SearchSettleMilliseconds
             $scannedRows++
 
-            $rowRecognition = Test-UltimateCurrentTarget -TargetWindow $TargetWindow -Label "LeftPresses=$leftPresses Row=$row"
+            $rowRecognition = Test-UltimateCurrentTarget -TargetWindow $TargetWindow -Label "SearchPresses=$searchPresses Row=$row"
             if ($rowRecognition.Match) {
-                Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Target matched. LeftPresses=$leftPresses Row=$row"
+                Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Target matched. SearchPresses=$searchPresses Row=$row"
                 $matchedInColumn = $true
                 break
             }
@@ -221,10 +241,10 @@ function Invoke-UltimateTargetSearch {
             return
         }
 
-        # No match in this column: step back up so the next Left press resumes from row 0.
+        # No match in this column: step back up so the next search press resumes from row 0.
         for ($restore = 1; $restore -le $scannedRows; $restore++) {
             $upResult = Send-AfkNamedKeyTap -Key 'W' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
-            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Vertical restore key sent. LeftPresses=$leftPresses Restore=$restore Key=W InputMethod=$($upResult.Method) DownResult=$($upResult.DownResult) UpResult=$($upResult.UpResult) DryRun=$DryRun"
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Vertical restore key sent. SearchPresses=$searchPresses Restore=$restore Key=W InputMethod=$($upResult.Method) DownResult=$($upResult.DownResult) UpResult=$($upResult.UpResult) DryRun=$DryRun"
             Wait-UltimateMilliseconds -Milliseconds $options.SearchSettleMilliseconds
         }
     }
@@ -271,11 +291,27 @@ function Invoke-UltimateAutoBuyCar {
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "AutoBuyCar phase started. Loops=$loopCount Steps=$(@($autoBuyCarOptions.AutoBuyCarSteps).Count) BetweenLoopsMs=$($autoBuyCarOptions.AutoBuyCarBetweenLoopsMilliseconds) InputMethod=$($options.InputMethod)"
     for ($loop = 1; $loop -le $loopCount; $loop++) {
         Invoke-UltimateKeySteps -Steps $autoBuyCarOptions.AutoBuyCarSteps -Mode 'AutoBuyCar' -LoopIndex $loop
+        # One AutoBuyCar loop buys exactly one (recommended) car. Bump the persisted
+        # cumulative total per loop so a mid-phase Stop still records what was bought.
+        # DryRun buys nothing, so it must not touch the real stat.
+        if (-not $DryRun) {
+            $cumulativeTotal = Add-UltimateAutoBuyCount -Paths $paths -Count 1
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "AutoBuyCar bought a car. Loop=$loop/$loopCount CumulativeTotal=$cumulativeTotal"
+        }
         if ($loop -lt $loopCount) {
             Wait-UltimateMilliseconds -Milliseconds $autoBuyCarOptions.AutoBuyCarBetweenLoopsMilliseconds
         }
     }
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "AutoBuyCar phase completed. Loops=$loopCount"
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "AutoBuyCar phase completed. Loops=$loopCount CumulativeTotal=$(Get-UltimateAutoBuyCount -Paths $paths)"
+}
+
+function Invoke-UltimateFindNewSubaru {
+    $loopCount = $findNewSubaruOptions.LoopCount
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "FindNewSubaru phase started. Loops=$loopCount MaxAttempts=$($findNewSubaruOptions.FindNewSubaruMaxSearchAttempts) SearchKey=$($findNewSubaruOptions.FindNewSubaruSearchKey) InputMethod=$($findNewSubaruOptions.InputMethod)"
+    # Reuses the Automation subsystem's FindNewSubaru CV loop verbatim (shared lib function).
+    # Logs flow to the Ultimate log because we pass Ultimate's $paths.
+    Invoke-AutomationFindNewSubaruLoop -Paths $paths -Options $findNewSubaruOptions -RecognitionImagePath $RecognitionImagePath -DryRun:$DryRun
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "FindNewSubaru phase completed. Loops=$loopCount"
 }
 
 $state = Get-UltimateState -Paths $paths
@@ -306,7 +342,7 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     Initialize-AfkNative
 
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate started. PID=$PID DpiAware=$script:DpiAwareResult StartupDelay=$($options.StartupDelaySeconds) InputMethod=$($options.InputMethod) ShareCode=$($options.ShareCode) SequenceLoops=$($options.SequenceLoopCount) AutoBuyCarLoops=$($autoBuyCarOptions.LoopCount) TargetKeywords='$($options.TargetKeywords -join ', ')' DryRun=$DryRun AssumeTargetFound=$AssumeTargetFound"
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate started. PID=$PID DpiAware=$script:DpiAwareResult StartupDelay=$($options.StartupDelaySeconds) InputMethod=$($options.InputMethod) ShareCode=$($options.ShareCode) SequenceLoops=$($options.SequenceLoopCount) AutoBuyCarLoops=$($autoBuyCarOptions.LoopCount) FindNewSubaruLoops=$($findNewSubaruOptions.LoopCount) StartFromStep=$($options.StartFromStep) TargetKeywords='$($options.TargetKeywords -join ', ')' DryRun=$DryRun AssumeTargetFound=$AssumeTargetFound"
 
     Wait-UltimateSeconds -Seconds $options.StartupDelaySeconds
 
@@ -325,19 +361,55 @@ try {
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Using recognition image path instead of live window. Path=$RecognitionImagePath"
     }
 
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Prelude started. Steps=$(@($options.PreludeSteps).Count)"
-    Invoke-UltimateKeySteps -Steps $options.PreludeSteps -Mode 'Prelude'
-    Invoke-UltimateShareCodeInput
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "After-code macro started. Steps=$(@($options.AfterCodeSteps).Count)"
-    Invoke-UltimateKeySteps -Steps $options.AfterCodeSteps -Mode 'AfterCode'
+    if ($options.StartFromStep -gt 5) {
+        Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Debug StartFromStep=$($options.StartFromStep): steps before $($options.StartFromStep) are skipped. The game must already be in the UI state that step $($options.StartFromStep) expects."
+    }
 
-    Invoke-UltimateTargetSearch -TargetWindow $targetWindow
-    Invoke-UltimateTargetConfirm
-    Invoke-UltimateSequenceLoops
+    if (Test-UltimateShouldRunStep -StepNumber 5 -StepName 'Prelude') {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Prelude started. Steps=$(@($options.PreludeSteps).Count)"
+        Invoke-UltimateKeySteps -Steps $options.PreludeSteps -Mode 'Prelude'
+    }
+    if (Test-UltimateShouldRunStep -StepNumber 6 -StepName 'ShareCode') {
+        Invoke-UltimateShareCodeInput
+    }
+    if (Test-UltimateShouldRunStep -StepNumber 7 -StepName 'AfterCode') {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "After-code macro started. Steps=$(@($options.AfterCodeSteps).Count)"
+        Invoke-UltimateKeySteps -Steps $options.AfterCodeSteps -Mode 'AfterCode'
+    }
 
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Post-sequence macro started. Steps=$(@($options.PostSequenceSteps).Count)"
-    Invoke-UltimateKeySteps -Steps $options.PostSequenceSteps -Mode 'PostSequence'
-    Invoke-UltimateAutoBuyCar
+    if (Test-UltimateShouldRunStep -StepNumber 8 -StepName 'TargetSearch') {
+        Invoke-UltimateTargetSearch -TargetWindow $targetWindow
+    }
+    if (Test-UltimateShouldRunStep -StepNumber 9 -StepName 'TargetConfirm') {
+        Invoke-UltimateTargetConfirm
+    }
+    if (Test-UltimateShouldRunStep -StepNumber 10 -StepName 'Sequence') {
+        Invoke-UltimateSequenceLoops
+    }
+
+    if (Test-UltimateShouldRunStep -StepNumber 11 -StepName 'PostSequence') {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Post-sequence macro started. Steps=$(@($options.PostSequenceSteps).Count)"
+        Invoke-UltimateKeySteps -Steps $options.PostSequenceSteps -Mode 'PostSequence'
+    }
+    if (Test-UltimateShouldRunStep -StepNumber 12 -StepName 'AutoBuyCar') {
+        Invoke-UltimateAutoBuyCar
+    }
+
+    # Configurable settle delay between AutoBuyCar (step 12) and the Post-buy macro (step 13).
+    # Only waits when step 12 actually ran (StartFromStep <= 12); jumping straight to step 13+
+    # for debugging skips the wait. Tune via config.json ultimate.afterAutoBuyCarDelayMilliseconds.
+    if ($options.StartFromStep -le 12 -and $options.AfterAutoBuyCarDelayMilliseconds -gt 0) {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Delay between AutoBuyCar and Post-buy macro. WaitMs=$($options.AfterAutoBuyCarDelayMilliseconds)"
+        Wait-UltimateMilliseconds -Milliseconds $options.AfterAutoBuyCarDelayMilliseconds
+    }
+
+    if (Test-UltimateShouldRunStep -StepNumber 13 -StepName 'PostBuy') {
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Post-buy macro started. Steps=$(@($options.PostBuySteps).Count)"
+        Invoke-UltimateKeySteps -Steps $options.PostBuySteps -Mode 'PostBuy'
+    }
+    if (Test-UltimateShouldRunStep -StepNumber 14 -StepName 'FindNewSubaru') {
+        Invoke-UltimateFindNewSubaru
+    }
 
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate completed. PID=$PID"
 }
