@@ -111,7 +111,8 @@
     "afterTargetConfirmDelayMilliseconds": 2000,
     "afterAutoBuyCarDelayMilliseconds": 2000,
     "workflowLoopCount": 1,
-    "sequenceLoopCount": 1,
+    "betweenWorkflowLoopsMilliseconds": 2000,
+    "sequenceLoopCount": 103,
     "sequence": {
       "enterDelaySeconds": 40,
       "xDelayMilliseconds": 500,

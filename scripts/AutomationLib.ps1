@@ -1232,9 +1232,17 @@ function Invoke-AutomationFindNewSubaruLoop {
                         -TempRoot $tempRoot
                     Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Vertical scan recognition. Loop=$loop Attempt=$attempt VS=$vs Match=$($vRecognition.Match) New=$($vRecognition.HasNewBadge) IsTargetWithoutBadge=$($vRecognition.IsTargetWithoutBadge) OcrSuccess=$($vRecognition.OcrSuccess) MatchMode=$($vRecognition.MatchMode) OcrText='$($vRecognition.OcrText)' Reason=$($vRecognition.Reason)"
 
-                    if ($vRecognition.Match -or $vRecognition.HasNewBadge) {
+                    # Select on a positive OCR target match, OR on a new badge ONLY when OCR could not
+                    # read the card (so a genuinely unreadable target is still caught). A new badge alone
+                    # is NOT sufficient: special-edition cars carry a gold badge that the yellow-pixel
+                    # detector flags as "new" -- e.g. the VIVIO RX-R "极限竞速特别版" (Forza Edition,
+                    # 1994 斯巴鲁 S2 900). When OCR succeeds and disconfirms the target (Match=False,
+                    # OcrSuccess=True), that badge must never select the car, or the vertical scan grabs
+                    # that wrong S2 Subaru instead of the 1998 target sitting elsewhere in the column.
+                    $vsBadgeOnlyTrust = $vRecognition.HasNewBadge -and -not $vRecognition.OcrSuccess
+                    if ($vRecognition.Match -or $vsBadgeOnlyTrust) {
                         $enterSendResult = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $Options.InputMethod -DryRun:$DryRun
-                        $vsSelectMode = if ($vRecognition.Match) { 'FullMatch' } else { 'BadgeOnly' }
+                        $vsSelectMode = if ($vRecognition.Match) { 'FullMatch' } else { 'BadgeOnlyOcrUnreadable' }
                         Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Vertical scan matched new target car. Enter sent. Loop=$loop Attempt=$attempt VS=$vs SelectMode=$vsSelectMode InputMethod=$($enterSendResult.Method) DownResult=$($enterSendResult.DownResult) UpResult=$($enterSendResult.UpResult) DryRun=$DryRun"
                         if ($Options.FindNewSubaruAfterSelectDelayMilliseconds -gt 0) {
                             Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "After-select delay $($Options.FindNewSubaruAfterSelectDelayMilliseconds)ms. Loop=$loop Attempt=$attempt VS=$vs"

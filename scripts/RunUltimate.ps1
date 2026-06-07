@@ -524,6 +524,15 @@ try {
         }
         Set-UltimateProgress -Paths $paths -Status 'running' -CurrentLoop $iteration -TotalLoops $effectiveWorkflowLoops -DisplayText $doneText -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate loop completed. $doneText"
+
+        # Settle pause between two consecutive whole-workflow iterations: only when another
+        # loop will follow (infinite, or finite with iterations left). Skipped after the final
+        # loop so the run ends promptly. Wait-UltimateMilliseconds is a no-op under DryRun.
+        $moreLoopsToGo = $isInfiniteWorkflow -or ($iteration -lt $effectiveWorkflowLoops)
+        if ($moreLoopsToGo -and $options.BetweenWorkflowLoopsMilliseconds -gt 0) {
+            Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Delay between Ultimate loops. WaitMs=$($options.BetweenWorkflowLoopsMilliseconds)"
+            Wait-UltimateMilliseconds -Milliseconds $options.BetweenWorkflowLoopsMilliseconds
+        }
     }
 
     $completedText = "All $effectiveWorkflowLoops loop(s) completed - total $(Format-UltimateDuration -Seconds (((Get-Date) - $overallStart).TotalSeconds))"

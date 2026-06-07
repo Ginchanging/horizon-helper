@@ -251,6 +251,10 @@ function Get-UltimateConfig {
     $afterAutoBuyCarDelayMilliseconds = 2000
     # How many times the WHOLE Ultimate workflow repeats. 0 = infinite (run until stopped).
     $workflowLoopCount = 1
+    # Pause inserted between two consecutive whole-workflow iterations (after step 14
+    # FindNewSubaru of one loop, before step 5 Prelude of the next) so the menu state
+    # settles before the next loop re-homes it. Not applied after the final loop.
+    $betweenWorkflowLoopsMilliseconds = 2000
     $sequenceLoopCount = 80
     $sequenceEnterDelaySeconds = 40
     $sequenceXDelayMilliseconds = 500
@@ -294,6 +298,7 @@ function Get-UltimateConfig {
             $afterTargetConfirmDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterTargetConfirmDelayMilliseconds' -DefaultValue $afterTargetConfirmDelayMilliseconds
             $afterAutoBuyCarDelayMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'afterAutoBuyCarDelayMilliseconds' -DefaultValue $afterAutoBuyCarDelayMilliseconds
             $workflowLoopCount = Get-UltimateConfigIntValue -Object $ultimate -Name 'workflowLoopCount' -DefaultValue $workflowLoopCount
+            $betweenWorkflowLoopsMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'betweenWorkflowLoopsMilliseconds' -DefaultValue $betweenWorkflowLoopsMilliseconds
             $sequenceLoopCount = Get-UltimateConfigIntValue -Object $ultimate -Name 'sequenceLoopCount' -DefaultValue $sequenceLoopCount
             $searchKey = Normalize-AfkKeyName -Key (Get-UltimateConfigStringValue -Object $ultimate -Name 'searchKey' -DefaultValue $searchKey)
             $searchSettleMilliseconds = Get-UltimateConfigIntValue -Object $ultimate -Name 'searchSettleMilliseconds' -DefaultValue $searchSettleMilliseconds
@@ -333,6 +338,7 @@ function Get-UltimateConfig {
         @{ Name = 'ultimate.afterTargetSelectDelayMilliseconds'; Value = $afterTargetSelectDelayMilliseconds },
         @{ Name = 'ultimate.afterTargetConfirmDelayMilliseconds'; Value = $afterTargetConfirmDelayMilliseconds },
         @{ Name = 'ultimate.afterAutoBuyCarDelayMilliseconds'; Value = $afterAutoBuyCarDelayMilliseconds },
+        @{ Name = 'ultimate.betweenWorkflowLoopsMilliseconds'; Value = $betweenWorkflowLoopsMilliseconds },
         @{ Name = 'ultimate.sequence.enterDelaySeconds'; Value = $sequenceEnterDelaySeconds },
         @{ Name = 'ultimate.sequence.xDelayMilliseconds'; Value = $sequenceXDelayMilliseconds },
         @{ Name = 'ultimate.sequence.loopDelaySeconds'; Value = $sequenceLoopDelaySeconds },
@@ -375,6 +381,7 @@ function Get-UltimateConfig {
         AfterTargetConfirmDelayMilliseconds  = $afterTargetConfirmDelayMilliseconds
         AfterAutoBuyCarDelayMilliseconds     = $afterAutoBuyCarDelayMilliseconds
         WorkflowLoopCount                    = $workflowLoopCount
+        BetweenWorkflowLoopsMilliseconds     = $betweenWorkflowLoopsMilliseconds
         SequenceLoopCount                    = $sequenceLoopCount
         SequenceEnterDelaySeconds            = $sequenceEnterDelaySeconds
         SequenceXDelayMilliseconds           = $sequenceXDelayMilliseconds
@@ -437,6 +444,7 @@ function Resolve-UltimateRuntimeOptions {
         AfterTargetConfirmDelayMilliseconds = $Config.AfterTargetConfirmDelayMilliseconds
         AfterAutoBuyCarDelayMilliseconds    = $Config.AfterAutoBuyCarDelayMilliseconds
         WorkflowLoopCount                   = $resolvedWorkflowLoopCount
+        BetweenWorkflowLoopsMilliseconds    = $Config.BetweenWorkflowLoopsMilliseconds
         SequenceLoopCount                   = $resolvedSequenceLoopCount
         SequenceEnterDelaySeconds           = $Config.SequenceEnterDelaySeconds
         SequenceXDelayMilliseconds          = $Config.SequenceXDelayMilliseconds
