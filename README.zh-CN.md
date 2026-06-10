@@ -8,11 +8,12 @@ GameSave Guardian 是一个便携式 Windows 小工具，用来自动备份 Xbox
 
 1. 下载 release zip 并解压。
 2. 双击 `GameSaveGuardian.cmd` 打开图形界面。
-3. 在 `Backup` 页里启动自动备份、停止自动备份，或立即备份一次。
-4. 在 `Focus Lock` 页里刷新窗口列表，选择窗口，然后启动焦点锁定。
-5. 在 `AFK` 页里选择模式，并启动或停止挂机按键循环。
-6. 在 `Automation` 页里启动 `AutoBuyCar`、`DeleteCar` 或 `FindNewSubaru` 车辆自动化。
-7. 在 `Ultimate` 页里启动分享代码、OCR 选车和 80 轮 Sequence 的终极流程。
+3. 在左侧导航栏切换页面；页面名旁出现绿色圆点表示该子系统正在后台运行。
+4. 在 `Backup` 页里启动自动备份、停止自动备份，或立即备份一次。
+5. 在 `Focus Lock` 页里刷新窗口列表，选择窗口，然后启动焦点锁定。
+6. 在 `AFK` 页里选择模式，并启动或停止挂机按键循环。
+7. 在 `Automation` 页里启动 `AutoBuyCar`、`DeleteCar` 或 `FindNewSubaru` 车辆自动化。
+8. 在 `Ultimate` 页里启动分享代码、OCR 选车和 Sequence 刷圈的终极流程。运行时界面每 2 秒自动刷新：进度条显示当前大循环进度和预计完成时间，暂停时显示红色 `PAUSED`；日志预览会给 ERROR/WARN 行着色，并提供关键词过滤框和自动滚动开关。
 
 只需要 Windows 自带的 Windows PowerShell 5.1，不需要安装 Python、Node.js、.NET SDK 或安装包。
 
@@ -49,7 +50,7 @@ GameSave Guardian 是一个便携式 Windows 小工具，用来自动备份 Xbox
 
 注意：挂机功能会把按键发送给当前前台窗口。它不会阻止游戏失焦暂停；如果你点到别的软件，按键可能会发送到别的软件。
 
-AFK 默认使用 `SendKeys` 发送按键。修改 `config.json` 里的 `afk.inputMethod` 后，需要停止并重新启动 AFK 才会生效。
+AFK（以及车辆自动化 / Ultimate）默认使用 `SendInputScanCode`（扫描码 `SendInput`）发送按键——游戏识别最稳，能避免 `SendKeys` 偶发的多发/漏发一个键（一个多余的键会顶错菜单光标、让宏错位）。如果某台机器上不响应，可改为 `SendInputVirtualKey` 或 `SendKeys`。修改 `config.json` 里的 `afk.inputMethod` 后，需要停止并重新启动 AFK 才会生效。
 
 车辆自动化：
 
@@ -66,6 +67,7 @@ Ultimate 终极流程：
 - 使用 Windows OCR 查找同时匹配 `1998`、`斯巴`、`S1`、`790` 的车辆卡（目标就是 1998 斯巴鲁 S1 790；这里用 `斯巴` 而不是 `斯巴鲁`，因为 OCR 经常把 `鲁` 误读成 `兽`、`口`，而 `斯`、`巴` 识别稳定）。
 - 命中后按 `Enter`，等待配置时间，再执行独立的 80 轮 `Sequence`。
 - 每轮 `Sequence` 的 40 秒等待期间，用虚拟手柄按住右扳机（油门）让车持续前进——因为 Forza 开车时会忽略注入的键盘，纯按键无法持续前进。
+- **暂停 / 继续**：`Ultimate` 页有 `Pause / Resume` 切换按钮。点 `Pause` 会在**下一个安全边界**（当前这场比赛或这一小轮结束时，而非立刻）停住、松开按键、状态显示 `PAUSED`，此时可自由 alt-tab 去用电脑；点 `Resume` 会倒计时几秒（让你切回游戏）后从原处继续。仅 Ultimate 有此功能，详见 `ULTIMATE.md` 的「暂停 / 继续」。
 - Ultimate 和 AFK、Automation 不能同时运行。
 
 > **手柄油门依赖（仅 Ultimate）**：上面的手柄油门需要安装 **ViGEmBus 驱动**（<https://github.com/nefarius/ViGEmBus/releases>，现代签名驱动，和 Win11 内存完整性兼容，通常免重启），随附的 `Nefarius.ViGEm.Client.dll` 已在包内。不想用时把 `config.json` 的 `ultimate.gamepadThrottle.enabled` 设为 `false`，第 10 步会退回纯等待。详见 `ULTIMATE.md` 的「虚拟手柄油门」。
@@ -104,7 +106,7 @@ Ultimate 终极流程：
   "afk": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendKeys",
+    "inputMethod": "SendInputScanCode",
     "sequence": {
       "enterDelaySeconds": 55,
       "xDelayMilliseconds": 500,
@@ -125,7 +127,7 @@ Ultimate 终极流程：
   "automation": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendKeys",
+    "inputMethod": "SendInputScanCode",
     "autoBuyCar": {
       "loopCount": 1,
       "betweenLoopsMilliseconds": 1000,
@@ -172,7 +174,7 @@ Ultimate 终极流程：
 - `maxBackups`：最多保留多少份最新备份。设置为 `0` 表示不自动删除旧备份。
 - `afk.startupDelaySeconds`：启动 AFK 后等待多少秒再开始发按键，用来给你切回游戏窗口。
 - `afk.keyTapHoldMilliseconds`：每次按键按下后保持多少毫秒再抬起。
-- `afk.inputMethod`：AFK 的按键发送方式。默认 `SendKeys`，更接近最早的简单 PowerShell 脚本；如果游戏不响应，可改为 `SendInputScanCode` 或 `SendInputVirtualKey` 测试兼容性。
+- `afk.inputMethod`：AFK 的按键发送方式。默认 `SendInputScanCode`（扫描码 `SendInput`，游戏识别最稳）；如果某台机器上不响应，可改为 `SendInputVirtualKey` 或 `SendKeys` 测试兼容性。
 - `afk.sequence.enterDelaySeconds`：`Sequence` 模式第一次 `Enter` 后等待多少秒。
 - `afk.sequence.xDelayMilliseconds`：`Sequence` 模式两次 `x` 前后的等待毫秒数。
 - `afk.sequence.loopDelaySeconds`：`Sequence` 模式每轮末尾等待多少秒。
@@ -181,7 +183,7 @@ Ultimate 终极流程：
 - `afk.macroCombo.steps`：`MacroCombo` 的按键步骤，每一项的 `key` 是按键，`waitMilliseconds` 是这次按键后等待多少毫秒。
 - `automation.startupDelaySeconds`：启动自动化后等待多少秒再捕获前台游戏窗口。
 - `automation.keyTapHoldMilliseconds`：车辆自动化每次按键按下后保持多少毫秒再抬起。
-- `automation.inputMethod`：车辆自动化的按键发送方式。默认 `SendKeys`，可改为 `SendInputScanCode` 或 `SendInputVirtualKey` 测试兼容性。
+- `automation.inputMethod`：车辆自动化的按键发送方式。默认 `SendInputScanCode`（扫描码 `SendInput`，游戏识别最稳），可改为 `SendInputVirtualKey` 或 `SendKeys` 测试兼容性。
 - `automation.autoBuyCar.loopCount`：`AutoBuyCar` 默认循环次数。
 - `automation.autoBuyCar.steps`：`AutoBuyCar` 每轮按键和等待时间。
 - `automation.autoBuyCar.betweenLoopsMilliseconds`：`AutoBuyCar` 两轮之间等待多少毫秒。

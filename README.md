@@ -10,11 +10,12 @@ The default save folder is `C:\XboxGames\GameSave\pgs`. Backups are written to t
 
 1. Download and unzip the release package.
 2. Double-click `GameSaveGuardian.cmd`.
-3. Use the Backup tab to start auto backup, stop auto backup, or create a backup immediately.
-4. Use the Focus Lock tab to refresh visible windows, select one, and keep it focused.
-5. Use the AFK tab to choose a mode and start or stop the game AFK key loop.
-6. Use the Automation tab for AutoBuyCar, DeleteCar, or FindNewSubaru workflows.
-7. Use the Ultimate tab for the share-code, OCR target-select, and 80-loop Sequence workflow.
+3. Pick a page in the left sidebar. A green dot next to a page name means that subsystem is currently running.
+4. Use the Backup page to start auto backup, stop auto backup, or create a backup immediately.
+5. Use the Focus Lock page to refresh visible windows, select one, and keep it focused.
+6. Use the AFK page to choose a mode and start or stop the game AFK key loop.
+7. Use the Automation page for AutoBuyCar, DeleteCar, or FindNewSubaru workflows.
+8. Use the Ultimate page for the share-code, OCR target-select, and Sequence workflow. It refreshes itself every 2 seconds while running: a progress bar shows the current workflow loop and ETA, `PAUSED` is shown in red, and the log preview colours ERROR/WARN lines (with a keyword filter and an auto-scroll toggle).
 
 Windows PowerShell 5.1 is enough. No Python, Node.js, .NET SDK, or installer is required.
 
@@ -50,7 +51,7 @@ Edit `config.json`:
   "afk": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendKeys",
+    "inputMethod": "SendInputScanCode",
     "sequence": {
       "enterDelaySeconds": 55,
       "xDelayMilliseconds": 500,
@@ -71,7 +72,7 @@ Edit `config.json`:
   "automation": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendKeys",
+    "inputMethod": "SendInputScanCode",
     "autoBuyCar": {
       "loopCount": 1,
       "betweenLoopsMilliseconds": 1000,
@@ -118,13 +119,13 @@ Edit `config.json`:
 - `maxBackups`: number of newest backups to keep. Use `0` to keep all backups.
 - `afk.startupDelaySeconds`: countdown before keys start sending.
 - `afk.keyTapHoldMilliseconds`: how long a key tap is held.
-- `afk.inputMethod`: key sending backend for AFK. Default is `SendKeys`; alternatives are `SendInputScanCode` and `SendInputVirtualKey`.
+- `afk.inputMethod`: key sending backend for AFK. Default is `SendInputScanCode` (scan-code `SendInput`, which games read most reliably); alternatives are `SendInputVirtualKey` and `SendKeys`.
 - `afk.sequence.*`: timings for `Sequence` mode.
 - `afk.enterEvery10s.delaySeconds`: interval for `EnterEvery10s` mode.
 - `afk.macroCombo.cycleDelaySeconds`: seconds to wait between `MacroCombo` cycles. Use `0` for no extra wait.
 - `afk.macroCombo.steps`: editable `MacroCombo` key steps. Each step sends one key, then waits `waitMilliseconds`.
 - `automation.startupDelaySeconds`: countdown before automation captures the foreground game window.
-- `automation.inputMethod`: key sending backend for Automation. Default is `SendKeys`; alternatives are `SendInputScanCode` and `SendInputVirtualKey`.
+- `automation.inputMethod`: key sending backend for Automation. Default is `SendInputScanCode` (scan-code `SendInput`, which games read most reliably); alternatives are `SendInputVirtualKey` and `SendKeys`.
 - `automation.autoBuyCar.*`: loop count and key steps for the car-buying sequence.
 - `automation.deleteCar.*`: loop count, between-loops wait, and editable key steps for the delete-car key sequence (an AFK-style keyboard macro run for the chosen number of loops).
 - `automation.findNewSubaru.*`: loop count, search key, max attempts, badge/text recognition settings, and target keywords.
@@ -137,7 +138,7 @@ Logs are written to `logs\backup.log`, `logs\focus-lock.log`, `logs\afk.log`, `l
 
 The AFK feature sends keys to the current foreground window. Before starting it, switch to the game window during the 5-second countdown.
 
-AFK defaults to `SendKeys`, matching the original simple PowerShell script more closely. If a game or menu does not respond, try changing `afk.inputMethod` in `config.json` to `SendInputScanCode` or `SendInputVirtualKey`, then stop and start AFK again.
+AFK (and Automation/Ultimate) default to `SendInputScanCode` — scan-code `SendInput`, which the game reads most reliably and which avoids the occasional dropped or duplicated key that `SendKeys` can produce (a stray key can shift a menu cursor and desync the macro). If a game or menu does not respond to it, try `SendInputVirtualKey` or `SendKeys` in `afk.inputMethod`, then stop and start AFK again.
 
 Modes:
 
@@ -165,6 +166,8 @@ If OCR sees a new non-target car or cannot read the card text, the workflow logs
 Ultimate is independent from Backup, Focus Lock, AFK, and Automation. It sends a fixed setup macro, enters share code `705399298`, searches for the OCR target `1998 + 斯巴 + S1 + 790` (the 1998 Subaru S1 790; it matches `斯巴` rather than the full `斯巴鲁` because Windows OCR often misreads `鲁` as `兽`/`口`, while `斯`/`巴` read reliably and `1998 + S1 + 790` keep the target unambiguous), selects it, waits, then runs its own configured Sequence 80 times.
 
 During each Sequence loop's 40-second wait, Ultimate holds a virtual gamepad's right trigger (throttle) so the car keeps driving forward — Forza ignores injected keyboard while driving, so a held `W` key does not work.
+
+**Pause / Resume:** the `Ultimate` tab has a `Pause / Resume` toggle. Clicking `Pause` halts at the next *safe boundary* (the end of the current race or loop — not instantly), releases the keys, and shows `PAUSED`, so you can alt-tab and use the PC; clicking `Resume` continues from where it stopped after a short countdown (switch back to the game first). Ultimate only; see "暂停 / 继续" in `ULTIMATE.md`.
 
 > **Gamepad throttle dependency (Ultimate only):** the throttle above needs the **ViGEmBus driver** (<https://github.com/nefarius/ViGEmBus/releases>; a modern signed driver, compatible with Windows 11 Memory Integrity, usually no reboot). The bundled `Nefarius.ViGEm.Client.dll` is already in the package. To disable it, set `ultimate.gamepadThrottle.enabled` to `false` in `config.json` and step 10 falls back to a plain wait. See "虚拟手柄油门" in `ULTIMATE.md`.
 

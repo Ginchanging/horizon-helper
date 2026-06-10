@@ -65,6 +65,39 @@ function Wait-UltimateSeconds {
     }
 }
 
+function Wait-UltimatePauseGate {
+    # Block here while the GUI's pause flag (runtime/ultimate.pause) is present, so the worker
+    # halts at a SAFE boundary (between races / loops) rather than mid-keystroke -- pausing in the
+    # middle of a menu macro would desync the game UI. Called at the top of the workflow loop,
+    # each Sequence iteration, each AutoBuyCar loop, and each FindNewSubaru loop. No-op under
+    # DryRun so dry-run tests never block.
+    param(
+        [string]$Context = ''
+    )
+
+    if ($DryRun) { return }
+    if (-not (Test-UltimatePause -Paths $paths)) { return }
+
+    # Entering pause: make the game state safe -- release any held movement key (W) and zero the
+    # gamepad throttle so nothing is stuck forward while we sit idle.
+    Release-AfkKeys -DryRun:$DryRun
+    if ($options.GamepadThrottleEnabled) {
+        try { Set-AfkGamepadRightTrigger -Value 0 } catch { }
+    }
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Paused by GUI. Context=$Context Waiting for Resume (delete runtime/ultimate.pause)."
+    Set-UltimateProgress -Paths $paths -Status 'paused' -CurrentLoop 0 -TotalLoops 0 -DisplayText "Paused - $Context (press Resume)" -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+
+    while (Test-UltimatePause -Paths $paths) {
+        Start-Sleep -Milliseconds 500
+    }
+
+    # Resumed: give the user a few seconds to switch back to the game window before keys fly again,
+    # just like the initial startup countdown.
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Resumed by GUI. Context=$Context Re-focus countdown $($options.StartupDelaySeconds)s before continuing."
+    Set-UltimateProgress -Paths $paths -Status 'running' -CurrentLoop 0 -TotalLoops 0 -DisplayText "Resuming - $Context (switch to the game)" -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    Wait-UltimateSeconds -Seconds $options.StartupDelaySeconds
+}
+
 function Invoke-UltimateThrottleWait {
     # The Sequence loop presses Enter to start the in-race drive, then waits SequenceEnterDelaySeconds.
     # During that wait, hold the virtual-gamepad throttle (right trigger) so the car drives forward the
@@ -305,6 +338,8 @@ function Invoke-UltimateTargetConfirm {
 
 function Invoke-UltimateSequenceLoops {
     for ($loop = 1; $loop -le $options.SequenceLoopCount; $loop++) {
+        # Safe pause point: halt before starting this race, not mid-drive (the dominant grind).
+        Wait-UltimatePauseGate -Context "sequence $loop/$($options.SequenceLoopCount)"
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence loop started. Loop=$loop Total=$($options.SequenceLoopCount)"
 
         $enter1 = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
@@ -332,6 +367,7 @@ function Invoke-UltimateAutoBuyCar {
     $loopCount = $autoBuyCarOptions.LoopCount
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "AutoBuyCar phase started. Loops=$loopCount Steps=$(@($autoBuyCarOptions.AutoBuyCarSteps).Count) BetweenLoopsMs=$($autoBuyCarOptions.AutoBuyCarBetweenLoopsMilliseconds) InputMethod=$($options.InputMethod)"
     for ($loop = 1; $loop -le $loopCount; $loop++) {
+        Wait-UltimatePauseGate -Context "autobuy $loop/$loopCount"
         Invoke-UltimateKeySteps -Steps $autoBuyCarOptions.AutoBuyCarSteps -Mode 'AutoBuyCar' -LoopIndex $loop
         # One AutoBuyCar loop buys exactly one (recommended) car. Bump the persisted
         # cumulative total per loop so a mid-phase Stop still records what was bought.
@@ -352,8 +388,11 @@ function Invoke-UltimateFindNewSubaru {
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "FindNewSubaru phase started. Loops=$loopCount MaxAttempts=$($findNewSubaruOptions.FindNewSubaruMaxSearchAttempts) SearchKey=$($findNewSubaruOptions.FindNewSubaruSearchKey) InputMethod=$($findNewSubaruOptions.InputMethod)"
     # Reuses the Automation subsystem's FindNewSubaru CV loop verbatim (shared lib function).
     # Logs flow to the Ultimate log because we pass Ultimate's $paths.
-    Invoke-AutomationFindNewSubaruLoop -Paths $paths -Options $findNewSubaruOptions -RecognitionImagePath $RecognitionImagePath -DryRun:$DryRun
-    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "FindNewSubaru phase completed. Loops=$loopCount"
+    # -SoftFailOnExhaust: in the Ultimate workflow a single input desync (the cursor getting
+    # bumped off the car grid) must NOT exit(1) the whole run. The lib ends this phase with a
+    # WARN instead of throwing, and the outer workflow loop's next Prelude re-homes the menu.
+    Invoke-AutomationFindNewSubaruLoop -Paths $paths -Options $findNewSubaruOptions -RecognitionImagePath $RecognitionImagePath -DryRun:$DryRun -SoftFailOnExhaust -PauseCheck { Wait-UltimatePauseGate -Context 'findnewsubaru' }
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "FindNewSubaru phase finished. Loops=$loopCount (may end early on input desync; see any WARN above)"
 }
 
 $state = Get-UltimateState -Paths $paths
@@ -379,6 +418,8 @@ if ($automationState.Status -in @('Running', 'RunningUnverified')) {
 }
 
 Set-UltimatePid -Paths $paths
+# Clear any pause flag left over from a previous run/Stop so this fresh run does not pause instantly.
+Clear-UltimatePause -Paths $paths
 
 try {
     Add-Type -AssemblyName System.Windows.Forms
@@ -443,6 +484,8 @@ try {
     $iteration = 0
     while ($isInfiniteWorkflow -or $iteration -lt $effectiveWorkflowLoops) {
         $iteration++
+        # Safe pause point between whole-workflow iterations (paused time is excluded from loop timing).
+        Wait-UltimatePauseGate -Context "before loop $iteration"
         $loopStart = Get-Date
         $perLoopSeconds = if ($measuredLoopSeconds.Count -gt 0) { [double](($measuredLoopSeconds | Measure-Object -Average).Average) } else { $estLoopSeconds }
 
@@ -548,6 +591,9 @@ finally {
     # Zero the throttle and unplug the virtual controller on a clean exit/error. (On a force-Stop the
     # finally does not run, but the OS auto-unplugs the pad when this process dies, so it still cleans up.)
     Disconnect-AfkGamepad
+    # Clear the pause flag so it never outlives the worker. (On a force-Stop the GUI's Stop-AppUltimate
+    # clears it instead, and a fresh run clears stale flags at startup.)
+    Clear-UltimatePause -Paths $paths
     Remove-UltimatePid -Paths $paths
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate exited. PID=$PID"
 }

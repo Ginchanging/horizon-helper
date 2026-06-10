@@ -1175,7 +1175,17 @@ function Invoke-AutomationFindNewSubaruLoop {
         [Parameter(Mandatory = $true)]$Paths,
         [Parameter(Mandatory = $true)]$Options,
         [string]$RecognitionImagePath,
-        [switch]$DryRun
+        [switch]$DryRun,
+        # Optional pause gate, invoked at the top of each loop iteration. Ultimate passes its
+        # Wait-UltimatePauseGate here so a pause can halt between FindNewSubaru loops; the
+        # standalone Automation subsystem omits it (null = no-op), so its behavior is unchanged.
+        [scriptblock]$PauseCheck = $null,
+        # When set, a search that exhausts its attempts -- or whose cursor is detected off the car
+        # grid (an input desync; see $offGridStreak below) -- ends this FindNewSubaru phase with a
+        # WARN and returns, instead of throwing. Ultimate passes this so a single stray key cannot
+        # kill the whole run: the outer workflow loop's next Prelude re-homes the menu. The
+        # standalone Automation subsystem omits it, so it still throws (behavior unchanged).
+        [switch]$SoftFailOnExhaust
     )
 
     $targetWindow = 0
@@ -1192,7 +1202,15 @@ function Invoke-AutomationFindNewSubaruLoop {
 
     $tempRoot = Join-Path $Paths.RuntimeRoot 'automation-ocr'
     for ($loop = 1; $loop -le $Options.LoopCount; $loop++) {
+        if ($PauseCheck) { & $PauseCheck }
         $matched = $false
+        # Consecutive attempts whose highlighted element is too small to be a real car card.
+        # A real selected card highlights at ~284x217; an input desync drops the cursor onto a
+        # small off-grid button (~88x88, empty OCR). When that persists, the cursor has drifted
+        # off the grid and more search-key presses will not recover within this phase -- only the
+        # next workflow loop's Prelude re-homes. Used with -SoftFailOnExhaust to bail out early.
+        $offGridStreak = 0
+        $offGridStreakLimit = 6
         Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop started. Loop=$loop Total=$($Options.LoopCount)"
 
         for ($attempt = 1; $attempt -le $Options.FindNewSubaruMaxSearchAttempts; $attempt++) {
@@ -1211,6 +1229,22 @@ function Invoke-AutomationFindNewSubaruLoop {
                 -TempRoot $tempRoot
 
             Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Recognition result. Loop=$loop Attempt=$attempt Match=$($recognition.Match) Stop=$($recognition.Stop) New=$($recognition.HasNewBadge) IsTargetWithoutBadge=$($recognition.IsTargetWithoutBadge) OcrSuccess=$($recognition.OcrSuccess) MatchMode=$($recognition.MatchMode) Reason=$($recognition.Reason)"
+
+            # Off-grid / input-desync watchdog. A plausibly sized car-card highlight resets the
+            # streak; a too-small highlight (or no highlight at all) grows it. With -SoftFailOnExhaust,
+            # a sustained streak means the cursor drifted off the grid, so end this phase early and
+            # let the next workflow loop's Prelude re-home -- rather than grinding dead UI to the cap.
+            $rect = $recognition.Rect
+            if ($rect.Found -and $rect.Width -ge 180 -and $rect.Height -ge 150) {
+                $offGridStreak = 0
+            }
+            else {
+                $offGridStreak++
+                if ($SoftFailOnExhaust -and $offGridStreak -ge $offGridStreakLimit) {
+                    Write-AutomationLog -Paths $Paths -Level 'WARN' -Message "FindNewSubaru cursor appears off the car grid for $offGridStreak attempts (input desync). Ending this phase early so the next workflow loop can re-home. Loop=$loop Attempt=$attempt Rect=[$($rect.X),$($rect.Y),$($rect.Width),$($rect.Height)]"
+                    return
+                }
+            }
 
             if (-not $recognition.Match -and $recognition.IsTargetWithoutBadge -and $Options.FindNewSubaruVerticalScanSteps -gt 0) {
                 Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Target car found without new badge, scanning down. Loop=$loop Attempt=$attempt MaxRows=$($Options.FindNewSubaruVerticalScanSteps)"
@@ -1289,7 +1323,15 @@ function Invoke-AutomationFindNewSubaruLoop {
         }
 
         if (-not $matched) {
-            throw "FindNewSubaru did not find a confirmed new target car within $($Options.FindNewSubaruMaxSearchAttempts) attempts. Loop=$loop"
+            $exhaustMessage = "FindNewSubaru did not find a confirmed new target car within $($Options.FindNewSubaruMaxSearchAttempts) attempts. Loop=$loop"
+            if ($SoftFailOnExhaust) {
+                # Don't kill the whole run over one search that came up empty (usually an input
+                # desync left the cursor mishomed). End this phase; the next workflow loop's
+                # Prelude re-homes the menu and the run continues.
+                Write-AutomationLog -Paths $Paths -Level 'WARN' -Message "$exhaustMessage Ending this phase early (SoftFail) so the next workflow loop can re-home."
+                return
+            }
+            throw $exhaustMessage
         }
 
         Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop completed. Loop=$loop Total=$($Options.LoopCount)"

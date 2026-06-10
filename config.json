@@ -6,7 +6,7 @@
   "afk": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendKeys",
+    "inputMethod": "SendInputScanCode",
     "sequence": {
       "enterDelaySeconds": 40,
       "xDelayMilliseconds": 500,
@@ -58,9 +58,9 @@
   "automation": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendKeys",
+    "inputMethod": "SendInputScanCode",
     "autoBuyCar": {
-      "loopCount": 1,
+      "loopCount": 33,
       "betweenLoopsMilliseconds": 1000,
       "steps": [
         { "key": "Space", "waitMilliseconds": 1000 },
@@ -71,7 +71,7 @@
       ]
     },
     "findNewSubaru": {
-      "loopCount": 1,
+      "loopCount": 33,
       "betweenLoopsMilliseconds": 3000,
       "maxSearchAttempts": 50,
       "searchKey": "Left",
@@ -103,7 +103,7 @@
   },
   "ultimate": {
     "startupDelaySeconds": 5,
-    "inputMethod": "SendKeys",
+    "inputMethod": "SendInputScanCode",
     "keyTapHoldMilliseconds": 50,
     "shareCode": "705399298",
     "digitIntervalMilliseconds": 500,

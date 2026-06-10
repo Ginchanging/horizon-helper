@@ -29,6 +29,7 @@ function Get-UltimatePaths {
         LogPath          = Join-Path $logsRoot 'ultimate.log'
         AutoBuyCountPath = Join-Path $runtimeRoot 'ultimate-autobuy-count.txt'
         ProgressPath     = Join-Path $runtimeRoot 'ultimate-progress.json'
+        PausePath        = Join-Path $runtimeRoot 'ultimate.pause'
     }
 }
 
@@ -667,6 +668,40 @@ function Clear-UltimateProgress {
     if (Test-Path -LiteralPath $Paths.ProgressPath -PathType Leaf) {
         Remove-Item -LiteralPath $Paths.ProgressPath -Force -ErrorAction SilentlyContinue
     }
+}
+
+# Pause flag file (runtime/ultimate.pause). The GUI writes it to request a pause and deletes
+# it to resume; the detached worker polls it at safe loop boundaries (see Wait-UltimatePauseGate
+# in RunUltimate.ps1). This is the same file-based control channel as the pid/progress files --
+# the only way the GUI can signal the separate worker process.
+function Set-UltimatePause {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths
+    )
+
+    Initialize-UltimateWorkspace -Paths $Paths
+    Set-Content -LiteralPath $Paths.PausePath -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Encoding ASCII
+}
+
+function Clear-UltimatePause {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths
+    )
+
+    if (Test-Path -LiteralPath $Paths.PausePath -PathType Leaf) {
+        Remove-Item -LiteralPath $Paths.PausePath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-UltimatePause {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Paths
+    )
+
+    return [bool](Test-Path -LiteralPath $Paths.PausePath -PathType Leaf)
 }
 
 function Get-UltimateState {
