@@ -50,7 +50,7 @@ GameSave Guardian 是一个便携式 Windows 小工具，用来自动备份 Xbox
 
 注意：挂机功能会把按键发送给当前前台窗口。它不会阻止游戏失焦暂停；如果你点到别的软件，按键可能会发送到别的软件。
 
-AFK（以及车辆自动化 / Ultimate）默认使用 `SendInputScanCode`（扫描码 `SendInput`）发送按键——游戏识别最稳，能避免 `SendKeys` 偶发的多发/漏发一个键（一个多余的键会顶错菜单光标、让宏错位）。如果某台机器上不响应，可改为 `SendInputVirtualKey` 或 `SendKeys`。修改 `config.json` 里的 `afk.inputMethod` 后，需要停止并重新启动 AFK 才会生效。
+AFK（以及车辆自动化 / Ultimate）默认使用 `SendKeys` 发送按键。**Forza Horizon 完全无视 `SendInput` 注入的键盘**（`SendInputScanCode` / `SendInputVirtualKey` 在游戏里检测不到任何按键——2026-06-10 实测），所以玩 Forza 不要换后端。`SendKeys` 偶发多读/漏读一个键（可能顶错菜单光标），Ultimate 已内置自动恢复（见 ULTIMATE.md「脱格自愈」）。修改 `config.json` 里的 `afk.inputMethod` 后，需要停止并重新启动 AFK 才会生效。
 
 车辆自动化：
 
@@ -174,7 +174,7 @@ Ultimate 终极流程：
 - `maxBackups`：最多保留多少份最新备份。设置为 `0` 表示不自动删除旧备份。
 - `afk.startupDelaySeconds`：启动 AFK 后等待多少秒再开始发按键，用来给你切回游戏窗口。
 - `afk.keyTapHoldMilliseconds`：每次按键按下后保持多少毫秒再抬起。
-- `afk.inputMethod`：AFK 的按键发送方式。默认 `SendInputScanCode`（扫描码 `SendInput`，游戏识别最稳）；如果某台机器上不响应，可改为 `SendInputVirtualKey` 或 `SendKeys` 测试兼容性。
+- `afk.inputMethod`：AFK 的按键发送方式。默认 `SendKeys`——**Forza 唯一能识别的后端**（游戏无视 `SendInputScanCode` / `SendInputVirtualKey` 的注入），只有别的游戏才考虑换。
 - `afk.sequence.enterDelaySeconds`：`Sequence` 模式第一次 `Enter` 后等待多少秒。
 - `afk.sequence.xDelayMilliseconds`：`Sequence` 模式两次 `x` 前后的等待毫秒数。
 - `afk.sequence.loopDelaySeconds`：`Sequence` 模式每轮末尾等待多少秒。
@@ -183,7 +183,7 @@ Ultimate 终极流程：
 - `afk.macroCombo.steps`：`MacroCombo` 的按键步骤，每一项的 `key` 是按键，`waitMilliseconds` 是这次按键后等待多少毫秒。
 - `automation.startupDelaySeconds`：启动自动化后等待多少秒再捕获前台游戏窗口。
 - `automation.keyTapHoldMilliseconds`：车辆自动化每次按键按下后保持多少毫秒再抬起。
-- `automation.inputMethod`：车辆自动化的按键发送方式。默认 `SendInputScanCode`（扫描码 `SendInput`，游戏识别最稳），可改为 `SendInputVirtualKey` 或 `SendKeys` 测试兼容性。
+- `automation.inputMethod`：车辆自动化的按键发送方式。默认 `SendKeys`（同 `afk.inputMethod`——Forza 无视 `SendInput` 后端）。
 - `automation.autoBuyCar.loopCount`：`AutoBuyCar` 默认循环次数。
 - `automation.autoBuyCar.steps`：`AutoBuyCar` 每轮按键和等待时间。
 - `automation.autoBuyCar.betweenLoopsMilliseconds`：`AutoBuyCar` 两轮之间等待多少毫秒。

@@ -119,13 +119,13 @@ Edit `config.json`:
 - `maxBackups`: number of newest backups to keep. Use `0` to keep all backups.
 - `afk.startupDelaySeconds`: countdown before keys start sending.
 - `afk.keyTapHoldMilliseconds`: how long a key tap is held.
-- `afk.inputMethod`: key sending backend for AFK. Default is `SendInputScanCode` (scan-code `SendInput`, which games read most reliably); alternatives are `SendInputVirtualKey` and `SendKeys`.
+- `afk.inputMethod`: key sending backend for AFK. Default is `SendKeys` — **the only backend Forza Horizon actually accepts**; the game ignores raw `SendInput` injection (`SendInputScanCode` / `SendInputVirtualKey` produce no input in-game), so only change this for other games.
 - `afk.sequence.*`: timings for `Sequence` mode.
 - `afk.enterEvery10s.delaySeconds`: interval for `EnterEvery10s` mode.
 - `afk.macroCombo.cycleDelaySeconds`: seconds to wait between `MacroCombo` cycles. Use `0` for no extra wait.
 - `afk.macroCombo.steps`: editable `MacroCombo` key steps. Each step sends one key, then waits `waitMilliseconds`.
 - `automation.startupDelaySeconds`: countdown before automation captures the foreground game window.
-- `automation.inputMethod`: key sending backend for Automation. Default is `SendInputScanCode` (scan-code `SendInput`, which games read most reliably); alternatives are `SendInputVirtualKey` and `SendKeys`.
+- `automation.inputMethod`: key sending backend for Automation. Default is `SendKeys` (see `afk.inputMethod` — Forza ignores the `SendInput` backends).
 - `automation.autoBuyCar.*`: loop count and key steps for the car-buying sequence.
 - `automation.deleteCar.*`: loop count, between-loops wait, and editable key steps for the delete-car key sequence (an AFK-style keyboard macro run for the chosen number of loops).
 - `automation.findNewSubaru.*`: loop count, search key, max attempts, badge/text recognition settings, and target keywords.
@@ -138,7 +138,7 @@ Logs are written to `logs\backup.log`, `logs\focus-lock.log`, `logs\afk.log`, `l
 
 The AFK feature sends keys to the current foreground window. Before starting it, switch to the game window during the 5-second countdown.
 
-AFK (and Automation/Ultimate) default to `SendInputScanCode` — scan-code `SendInput`, which the game reads most reliably and which avoids the occasional dropped or duplicated key that `SendKeys` can produce (a stray key can shift a menu cursor and desync the macro). If a game or menu does not respond to it, try `SendInputVirtualKey` or `SendKeys` in `afk.inputMethod`, then stop and start AFK again.
+AFK (and Automation/Ultimate) default to `SendKeys`. **Forza Horizon ignores keys injected via raw `SendInput`** (`SendInputScanCode` / `SendInputVirtualKey` are not detected by the game at all — verified 2026-06-10), so do not switch the backend for Forza. `SendKeys` can very occasionally drop or double a key (which can shift a menu cursor); Ultimate recovers from that automatically (see ULTIMATE.md "脱格自愈").
 
 Modes:
 

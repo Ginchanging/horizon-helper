@@ -45,6 +45,42 @@ function Initialize-AutomationWorkspace {
     }
 }
 
+function Write-AutomationFileWithRetry {
+    # PS 5.1 Set-Content needs the file momentarily free of ANY other open handle; a GUI
+    # poll or antivirus scan holding it at that instant throws "being used by another
+    # process". Retry briefly; only ThrowOnFailure callers (load-bearing state like the
+    # pid file) may surface the failure.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Value,
+        [ValidateSet('UTF8', 'ASCII')][string]$Encoding = 'UTF8',
+        [switch]$Append,
+        [switch]$ThrowOnFailure
+    )
+
+    $maxAttempts = 5
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            if ($Append) {
+                Add-Content -LiteralPath $LiteralPath -Value $Value -Encoding $Encoding -ErrorAction Stop
+            } else {
+                Set-Content -LiteralPath $LiteralPath -Value $Value -Encoding $Encoding -ErrorAction Stop
+            }
+            return $true
+        } catch {
+            # Under contention PS 5.1 throws ArgumentException ("stream was not readable")
+            # far more often than IOException, so the catch must stay untyped.
+            if ($attempt -ge $maxAttempts) {
+                if ($ThrowOnFailure) { throw }
+                return $false
+            }
+            Start-Sleep -Milliseconds 60
+        }
+    }
+    return $false
+}
+
 function Write-AutomationLog {
     [CmdletBinding()]
     param(
@@ -55,7 +91,7 @@ function Write-AutomationLog {
 
     Initialize-AutomationWorkspace -Paths $Paths
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Add-Content -LiteralPath $Paths.LogPath -Value "[$timestamp] [$Level] $Message" -Encoding UTF8
+    $null = Write-AutomationFileWithRetry -LiteralPath $Paths.LogPath -Value "[$timestamp] [$Level] $Message" -Encoding UTF8 -Append
 }
 
 function Test-AutomationConfigProperty {
@@ -349,7 +385,7 @@ function Set-AutomationPid {
     )
 
     Initialize-AutomationWorkspace -Paths $Paths
-    Set-Content -LiteralPath $Paths.PidPath -Value ([string]$PID) -Encoding ASCII
+    $null = Write-AutomationFileWithRetry -LiteralPath $Paths.PidPath -Value ([string]$PID) -Encoding ASCII -ThrowOnFailure
 }
 
 function Remove-AutomationPid {

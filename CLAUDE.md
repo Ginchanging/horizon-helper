@@ -64,7 +64,7 @@ The GUI's `Start-App*` and the corresponding `Start*.ps1` contain **near-duplica
 
 `AfkLib.ps1` owns keyboard input for *every* subsystem (Automation and Ultimate dot-source it). Key facts:
 
-- `Send-AfkNamedKeyTap` / `Send-AfkDigitKeyTap` dispatch over three `inputMethod`s: `SendKeys` (default, WinForms `SendWait`), `SendInputScanCode`, `SendInputVirtualKey` (both via the runtime-compiled `GameAfkNative` C# class doing `SendInput` P/Invoke). If a game ignores input, switching method is the first fix.
+- `Send-AfkNamedKeyTap` / `Send-AfkDigitKeyTap` dispatch over three `inputMethod`s: `SendKeys` (default, WinForms `SendWait`), `SendInputScanCode`, `SendInputVirtualKey` (both via the runtime-compiled `GameAfkNative` C# class doing `SendInput` P/Invoke). **Forza Horizon ignores the raw `SendInput` backends entirely** (no keys detected in-game — verified 2026-06-10; same mechanism as it ignoring injected keyboard while driving), so for this game `inputMethod` must stay `SendKeys`. Its rare dropped/doubled key is handled by FindNewSubaru's desync soft-fail recovery, not by switching backends.
 - Input goes to the **current foreground window** after a startup countdown — there is no window targeting for key sends. Hence AFK / Automation / Ultimate are **mutually exclusive** (each checks the other two's state at startup and refuses to start). Backup and Focus Lock are independent and may run alongside anything.
 - `Release-AfkKeys` (a `W` key-up) is fired on every stop/exit as a safety net against a stuck movement key.
 
@@ -82,6 +82,7 @@ The GUI's `Start-App*` and the corresponding `Start*.ps1` contain **near-duplica
 - The `$scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {...}` idiom appears at the top of every script — keep it so scripts work whether dot-sourced or invoked directly.
 - All paths resolve relative to app root so the tool stays portable; `runtime/`, `logs/`, `backups/`, `dist/` are gitignored and created on demand. Never hard-code absolute paths.
 - Config/log I/O uses `-Encoding UTF8`; pid files use `-Encoding ASCII`. Config reads guard every field with `Test-*ConfigProperty` before access (StrictMode will throw otherwise).
+- All runtime file writes (log, pid, progress, counters, pause/target flags) go through each lib's `Write-<X>FileWithRetry`, never bare `Set-Content`/`Add-Content`. PS 5.1 `Set-Content` needs the target momentarily free of *any* other open handle — a GUI poll or antivirus scan at the wrong instant throws (mostly `ArgumentException` "stream was not readable", sometimes `IOException` "in use by another process"; this killed a real Ultimate run 2026-06-10). The helper retries 5×60 ms with an untyped catch, then drops the write (log/progress/count) or throws only for `-ThrowOnFailure` callers (pid, pause, focus target).
 - Functions return `[pscustomobject]`. Config presence is checked via `$obj.PSObject.Properties.Name -contains 'x'`, not `$obj.x -ne $null`.
 - AFK/Automation/Ultimate workers must be launched `-STA` (SendKeys + WinForms + OCR need it); the Backup watcher does not.
 

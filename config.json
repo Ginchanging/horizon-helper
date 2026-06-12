@@ -6,7 +6,7 @@
   "afk": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendInputScanCode",
+    "inputMethod": "SendKeys",
     "sequence": {
       "enterDelaySeconds": 40,
       "xDelayMilliseconds": 500,
@@ -58,7 +58,7 @@
   "automation": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendInputScanCode",
+    "inputMethod": "SendKeys",
     "autoBuyCar": {
       "loopCount": 33,
       "betweenLoopsMilliseconds": 1000,
@@ -103,7 +103,7 @@
   },
   "ultimate": {
     "startupDelaySeconds": 5,
-    "inputMethod": "SendInputScanCode",
+    "inputMethod": "SendKeys",
     "keyTapHoldMilliseconds": 50,
     "shareCode": "705399298",
     "digitIntervalMilliseconds": 500,
