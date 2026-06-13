@@ -15,7 +15,7 @@ The default save folder is `C:\XboxGames\GameSave\pgs`. Backups are written to t
 5. Use the Focus Lock page to refresh visible windows, select one, and keep it focused.
 6. Use the AFK page to choose a mode and start or stop the game AFK key loop.
 7. Use the Automation page for AutoBuyCar, DeleteCar, or FindNewSubaru workflows.
-8. Use the Ultimate page for the share-code, OCR target-select, and Sequence workflow. It refreshes itself every 2 seconds while running: a progress bar shows the current workflow loop and ETA, `PAUSED` is shown in red, and the log preview colours ERROR/WARN lines (with a keyword filter and an auto-scroll toggle).
+8. Use the Ultimate page for the share-code, OCR target-select, and Sequence workflow. It refreshes itself every 2 seconds while running: a progress bar shows the current workflow loop and ETA, `PAUSED` is shown in red, it also shows which iteration of the current inner phase (Sequence / AutoBuyCar / FindNewSubaru) is running with a per-phase progress bar, and the log preview colours ERROR/WARN lines (with a keyword filter and an auto-scroll toggle).
 
 Windows PowerShell 5.1 is enough. No Python, Node.js, .NET SDK, or installer is required.
 

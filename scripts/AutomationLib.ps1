@@ -1216,6 +1216,11 @@ function Invoke-AutomationFindNewSubaruLoop {
         # Wait-UltimatePauseGate here so a pause can halt between FindNewSubaru loops; the
         # standalone Automation subsystem omits it (null = no-op), so its behavior is unchanged.
         [scriptblock]$PauseCheck = $null,
+        # Optional progress reporter, invoked at the top of each loop iteration with
+        # ($currentLoop, $totalLoops). Ultimate passes a writer that records the FindNewSubaru
+        # phase counter into ultimate-progress.json so the GUI can show "第几次 FindNewSubaru";
+        # the standalone Automation subsystem omits it (null = no-op), so its behavior is unchanged.
+        [scriptblock]$ProgressCallback = $null,
         # When set, a search that exhausts its attempts -- or whose cursor is detected off the car
         # grid (an input desync; see $offGridStreak below) -- ends this FindNewSubaru phase with a
         # WARN and returns, instead of throwing. Ultimate passes this so a single stray key cannot
@@ -1239,6 +1244,7 @@ function Invoke-AutomationFindNewSubaruLoop {
     $tempRoot = Join-Path $Paths.RuntimeRoot 'automation-ocr'
     for ($loop = 1; $loop -le $Options.LoopCount; $loop++) {
         if ($PauseCheck) { & $PauseCheck }
+        if ($ProgressCallback) { & $ProgressCallback $loop $Options.LoopCount }
         $matched = $false
         # Consecutive attempts whose highlighted element is too small to be a real car card.
         # A real selected card highlights at ~284x217; an input desync drops the cursor onto a

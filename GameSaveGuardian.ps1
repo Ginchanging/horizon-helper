@@ -1299,6 +1299,42 @@ Add-AppRow -Table $automationTable -Control $automationLogCard -Fill
 # ---------------------------- Ultimate tab ----------------------------
 $ultimateTable = New-AppTabTable -Tab $ultimateTab
 
+# Owner-drawn horizontal progress bar. The view hashtable (Fraction/Text/BarColor) is stored on
+# the panel's .Tag so Update-UltimateLiveView can mutate it in place and Invalidate() to repaint.
+# Fraction $null/0 = no fill (idle / infinite) -- the centered overlay text still describes state.
+function New-AppProgressBar {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$View,
+        [int]$Height = 18
+    )
+
+    $bar = New-Object System.Windows.Forms.Panel
+    $bar.Size = New-Object System.Drawing.Size(790, $Height)
+    $bar.Anchor = $anchorTLR
+    $bar.BackColor = $Theme.LogBg
+    $bar.Tag = $View
+    $bar.Add_Paint({
+        param($sender, $e)
+        $g = $e.Graphics
+        $view = $sender.Tag
+        if ($null -ne $view.Fraction -and $view.Fraction -gt 0) {
+            $fillWidth = [int]([Math]::Min(1.0, $view.Fraction) * $sender.Width)
+            if ($fillWidth -gt 0) {
+                $fillBrush = New-Object System.Drawing.SolidBrush($view.BarColor)
+                $g.FillRectangle($fillBrush, 0, 0, $fillWidth, $sender.Height)
+                $fillBrush.Dispose()
+            }
+        }
+        if (-not [string]::IsNullOrEmpty($view.Text)) {
+            $flags = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
+            $bounds = New-Object System.Drawing.Rectangle(0, 0, $sender.Width, $sender.Height)
+            [System.Windows.Forms.TextRenderer]::DrawText($g, $view.Text, $sender.Font, $bounds, $Theme.White, $flags)
+        }
+    })
+    $bar.Add_Resize({ param($sender, $e) $sender.Invalidate() })
+    return $bar
+}
+
 $ultimateStatusCard = New-AppCard -Title 'Ultimate'
 
 # Big at-a-glance state line: RUNNING - Loop 2/10 / PAUSED / Stopped / Completed.
@@ -1312,46 +1348,60 @@ $ultimateBigStatusLabel.Tag = 'status'
 $ultimateBigStatusLabel.ForeColor = $Theme.Muted
 $ultimateStatusCard.Controls.Add($ultimateBigStatusLabel)
 
-# Owner-drawn workflow-loop progress bar. View state lives in $script:UltimateProgressView
-# (set by Update-UltimateLiveView, repainted via Invalidate). Fraction $null = no fill
-# (infinite mode / stopped) -- the overlay text still describes what is happening.
+# Workflow-loop progress bar (outer loop N/total). View state lives in $script:UltimateProgressView.
 $script:UltimateProgressView = @{ Fraction = $null; Text = ''; BarColor = $Theme.Accent }
-$ultimateProgressBar = New-Object System.Windows.Forms.Panel
-$ultimateProgressBar.Location = New-Object System.Drawing.Point(14, 64)
-$ultimateProgressBar.Size = New-Object System.Drawing.Size(790, 18)
-$ultimateProgressBar.Anchor = $anchorTLR
-$ultimateProgressBar.BackColor = $Theme.LogBg
-$ultimateProgressBar.Add_Paint({
-    param($sender, $e)
-    $g = $e.Graphics
-    $view = $script:UltimateProgressView
-    if ($null -ne $view.Fraction -and $view.Fraction -gt 0) {
-        $fillWidth = [int]([Math]::Min(1.0, $view.Fraction) * $sender.Width)
-        if ($fillWidth -gt 0) {
-            $fillBrush = New-Object System.Drawing.SolidBrush($view.BarColor)
-            $g.FillRectangle($fillBrush, 0, 0, $fillWidth, $sender.Height)
-            $fillBrush.Dispose()
-        }
-    }
-    if (-not [string]::IsNullOrEmpty($view.Text)) {
-        $flags = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
-        $bounds = New-Object System.Drawing.Rectangle(0, 0, $sender.Width, $sender.Height)
-        [System.Windows.Forms.TextRenderer]::DrawText($g, $view.Text, $sender.Font, $bounds, $Theme.White, $flags)
-    }
-})
-$ultimateProgressBar.Add_Resize({ param($sender, $e) $sender.Invalidate() })
+$ultimateProgressBar = New-AppProgressBar -View $script:UltimateProgressView -Height 18
+$ultimateProgressBar.Location = New-Object System.Drawing.Point(14, 62)
 $ultimateStatusCard.Controls.Add($ultimateProgressBar)
 
-# Detail line (muted): worker DisplayText (ETA etc), bought total, config summary.
+# Inner-phase label: which Sequence / AutoBuyCar / FindNewSubaru iteration the worker is on now.
+$ultimatePhaseLabel = New-Object System.Windows.Forms.Label
+$ultimatePhaseLabel.Location = New-Object System.Drawing.Point(14, 84)
+$ultimatePhaseLabel.Size = New-Object System.Drawing.Size(790, 20)
+$ultimatePhaseLabel.Anchor = $anchorTLR
+$ultimatePhaseLabel.Font = New-Object System.Drawing.Font('Segoe UI', 9.75, [System.Drawing.FontStyle]::Bold)
+$ultimatePhaseLabel.Text = ''
+$ultimatePhaseLabel.Tag = 'status'
+$ultimatePhaseLabel.ForeColor = $Theme.Muted
+$ultimateStatusCard.Controls.Add($ultimatePhaseLabel)
+
+# Per-phase progress bar (current iteration / phase total).
+$script:UltimatePhaseView = @{ Fraction = $null; Text = ''; BarColor = $Theme.Accent }
+$ultimatePhaseBar = New-AppProgressBar -View $script:UltimatePhaseView -Height 16
+$ultimatePhaseBar.Location = New-Object System.Drawing.Point(14, 106)
+$ultimateStatusCard.Controls.Add($ultimatePhaseBar)
+
+# Detail line (muted): worker DisplayText (ETA etc), bought total, config summary. Tall enough to
+# wrap onto a second line so the long config summary is never clipped.
 $ultimateStatusLabel = New-Object System.Windows.Forms.Label
-$ultimateStatusLabel.Location = New-Object System.Drawing.Point(14, 88)
-$ultimateStatusLabel.Size = New-Object System.Drawing.Size(790, 22)
+$ultimateStatusLabel.Location = New-Object System.Drawing.Point(14, 126)
+$ultimateStatusLabel.Size = New-Object System.Drawing.Size(790, 38)
 $ultimateStatusLabel.Anchor = $anchorTLR
 $ultimateStatusLabel.Text = 'Status: loading...'
 $ultimateStatusLabel.Tag = 'status'
 $ultimateStatusLabel.ForeColor = $Theme.Muted
 $ultimateStatusCard.Controls.Add($ultimateStatusLabel)
-Add-AppRow -Table $ultimateTable -Control $ultimateStatusCard -Height 122
+
+# These controls are built before the form is laid out, so an Anchor-Right would freeze a wrong
+# (over-wide) width against the card's default 200px size -- that pushes centered bar captions to
+# the far right and makes the detail label "wrap" past the visible edge (i.e. clip = still looks
+# truncated). Anchor Top|Left only and drive the widths from the card's real width on every resize.
+$anchorTL = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
+$ultimateStatusCardChildren = @($ultimateBigStatusLabel, $ultimateProgressBar, $ultimatePhaseLabel, $ultimatePhaseBar, $ultimateStatusLabel)
+foreach ($c in $ultimateStatusCardChildren) { $c.Anchor = $anchorTL }
+$ultimateStatusCard.Add_Resize({
+    param($sender, $e)
+    $w = $sender.ClientSize.Width - 28
+    if ($w -lt 50) { return }
+    $ultimateBigStatusLabel.Width = $w
+    $ultimateProgressBar.Width = $w
+    $ultimatePhaseLabel.Width = $w
+    $ultimatePhaseBar.Width = $w
+    $ultimateStatusLabel.Width = $w
+    $ultimateProgressBar.Invalidate()
+    $ultimatePhaseBar.Invalidate()
+})
+Add-AppRow -Table $ultimateTable -Control $ultimateStatusCard -Height 174
 
 $ultimateSettingsCard = New-AppCard -Title 'Run settings'
 $ultimateLoopLabel = New-Object System.Windows.Forms.Label
@@ -1799,12 +1849,40 @@ function Update-UltimateLiveView {
         $barText = "All $($progress.TotalLoops) loop(s) done"
     }
 
+    # Never leave the workflow bar blank -- show an idle caption when there is no fill so it
+    # always reads as a progress bar, not an empty grey strip.
+    if ([string]::IsNullOrEmpty($barText)) {
+        $barText = if ($progress -and $progress.Status -eq 'completed') { 'Completed' }
+                   elseif ($isRunning) { 'Starting...' }
+                   else { 'Stopped - press Start Ultimate' }
+    }
+
     $ultimateBigStatusLabel.Text = $bigText
     $ultimateBigStatusLabel.ForeColor = $bigColor
     $script:UltimateProgressView.Fraction = $fraction
     $script:UltimateProgressView.Text = $barText
     $script:UltimateProgressView.BarColor = $barColor
     $ultimateProgressBar.Invalidate()
+
+    # Inner-phase view: which Sequence / AutoBuyCar / FindNewSubaru iteration is running now.
+    $phaseLabelText = ''
+    $phaseBarText = ''
+    $phaseFraction = $null
+    $phaseColor = if ($isRunning -and $paused) { $Theme.Danger } else { $Theme.Accent }
+    if ($isRunning -and $progress -and -not [string]::IsNullOrWhiteSpace($progress.Phase) -and $progress.PhaseTotal -gt 0) {
+        $phaseLabelText = "$($progress.Phase)   $($progress.PhaseCurrent) / $($progress.PhaseTotal)"
+        $phaseFraction = [double]$progress.PhaseCurrent / [double]$progress.PhaseTotal
+        $phaseBarText = "$([int]($phaseFraction * 100))%"
+    }
+    elseif ($isRunning) {
+        $phaseLabelText = 'Preparing...'
+    }
+    $ultimatePhaseLabel.Text = $phaseLabelText
+    $ultimatePhaseLabel.ForeColor = if ($isRunning -and $paused) { $Theme.Danger } elseif ($isRunning) { $Theme.Text } else { $Theme.Muted }
+    $script:UltimatePhaseView.Fraction = $phaseFraction
+    $script:UltimatePhaseView.Text = $phaseBarText
+    $script:UltimatePhaseView.BarColor = $phaseColor
+    $ultimatePhaseBar.Invalidate()
 
     $detailText = ''
     if ($progress -and -not [string]::IsNullOrWhiteSpace($progress.DisplayText)) {

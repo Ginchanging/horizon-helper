@@ -13,7 +13,7 @@ GameSave Guardian 是一个便携式 Windows 小工具，用来自动备份 Xbox
 5. 在 `Focus Lock` 页里刷新窗口列表，选择窗口，然后启动焦点锁定。
 6. 在 `AFK` 页里选择模式，并启动或停止挂机按键循环。
 7. 在 `Automation` 页里启动 `AutoBuyCar`、`DeleteCar` 或 `FindNewSubaru` 车辆自动化。
-8. 在 `Ultimate` 页里启动分享代码、OCR 选车和 Sequence 刷圈的终极流程。运行时界面每 2 秒自动刷新：进度条显示当前大循环进度和预计完成时间，暂停时显示红色 `PAUSED`；日志预览会给 ERROR/WARN 行着色，并提供关键词过滤框和自动滚动开关。
+8. 在 `Ultimate` 页里启动分享代码、OCR 选车和 Sequence 刷圈的终极流程。运行时界面每 2 秒自动刷新：进度条显示当前大循环进度和预计完成时间，暂停时显示红色 `PAUSED`；界面还实时显示当前内圈阶段（Sequence / AutoBuyCar / FindNewSubaru）执行到第几次，并配一条阶段进度条；日志预览会给 ERROR/WARN 行着色，并提供关键词过滤框和自动滚动开关。
 
 只需要 Windows 自带的 Windows PowerShell 5.1，不需要安装 Python、Node.js、.NET SDK 或安装包。
 

@@ -45,6 +45,31 @@ $automationConfig = Get-AutomationConfig -AppRoot $paths.AppRoot
 $autoBuyCarOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'AutoBuyCar' -LoopCount $options.AutoBuyCarLoopCount
 $findNewSubaruOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'FindNewSubaru' -LoopCount $options.FindNewSubaruLoopCount
 
+# Outer-loop context carried into inner-phase progress writes. The inner loops (Sequence /
+# AutoBuyCar / FindNewSubaru) report which iteration they are on, but the progress JSON also
+# needs the current workflow loop + ETA text so the GUI's two-bar view stays consistent. These
+# are set once at the top of each workflow loop (see the main loop below).
+$script:UltimateLoopIteration = 0
+$script:UltimateLoopTotal = 0
+$script:UltimateLoopText = ''
+
+function Set-UltimatePhaseProgress {
+    # Write an inner-phase snapshot (Sequence/AutoBuyCar/FindNewSubaru + its iteration counter)
+    # while preserving the outer workflow loop context. The GUI reads phase/phaseCurrent/phaseTotal
+    # to show "第几次 <phase>" plus a per-phase progress bar.
+    param(
+        [Parameter(Mandatory = $true)][string]$Phase,
+        [int]$Current = 0,
+        [int]$Total = 0
+    )
+
+    Set-UltimateProgress -Paths $paths -Status 'running' `
+        -CurrentLoop $script:UltimateLoopIteration -TotalLoops $script:UltimateLoopTotal `
+        -DisplayText $script:UltimateLoopText `
+        -Phase $Phase -PhaseCurrent $Current -PhaseTotal $Total `
+        -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+}
+
 function Wait-UltimateMilliseconds {
     param(
         [int]$Milliseconds
@@ -340,6 +365,7 @@ function Invoke-UltimateSequenceLoops {
     for ($loop = 1; $loop -le $options.SequenceLoopCount; $loop++) {
         # Safe pause point: halt before starting this race, not mid-drive (the dominant grind).
         Wait-UltimatePauseGate -Context "sequence $loop/$($options.SequenceLoopCount)"
+        Set-UltimatePhaseProgress -Phase 'Sequence' -Current $loop -Total $options.SequenceLoopCount
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence loop started. Loop=$loop Total=$($options.SequenceLoopCount)"
 
         $enter1 = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
@@ -368,6 +394,7 @@ function Invoke-UltimateAutoBuyCar {
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "AutoBuyCar phase started. Loops=$loopCount Steps=$(@($autoBuyCarOptions.AutoBuyCarSteps).Count) BetweenLoopsMs=$($autoBuyCarOptions.AutoBuyCarBetweenLoopsMilliseconds) InputMethod=$($options.InputMethod)"
     for ($loop = 1; $loop -le $loopCount; $loop++) {
         Wait-UltimatePauseGate -Context "autobuy $loop/$loopCount"
+        Set-UltimatePhaseProgress -Phase 'AutoBuyCar' -Current $loop -Total $loopCount
         Invoke-UltimateKeySteps -Steps $autoBuyCarOptions.AutoBuyCarSteps -Mode 'AutoBuyCar' -LoopIndex $loop
         # One AutoBuyCar loop buys exactly one (recommended) car. Bump the persisted
         # cumulative total per loop so a mid-phase Stop still records what was bought.
@@ -391,7 +418,7 @@ function Invoke-UltimateFindNewSubaru {
     # -SoftFailOnExhaust: in the Ultimate workflow a single input desync (the cursor getting
     # bumped off the car grid) must NOT exit(1) the whole run. The lib ends this phase with a
     # WARN instead of throwing, and the outer workflow loop's next Prelude re-homes the menu.
-    Invoke-AutomationFindNewSubaruLoop -Paths $paths -Options $findNewSubaruOptions -RecognitionImagePath $RecognitionImagePath -DryRun:$DryRun -SoftFailOnExhaust -PauseCheck { Wait-UltimatePauseGate -Context 'findnewsubaru' }
+    Invoke-AutomationFindNewSubaruLoop -Paths $paths -Options $findNewSubaruOptions -RecognitionImagePath $RecognitionImagePath -DryRun:$DryRun -SoftFailOnExhaust -PauseCheck { Wait-UltimatePauseGate -Context 'findnewsubaru' } -ProgressCallback { param($c, $t) Set-UltimatePhaseProgress -Phase 'FindNewSubaru' -Current $c -Total $t }
     Write-UltimateLog -Paths $paths -Level 'INFO' -Message "FindNewSubaru phase finished. Loops=$loopCount (may end early on input desync; see any WARN above)"
 }
 
@@ -498,6 +525,10 @@ try {
             $etaClock = if ($etaFinish.Date -eq (Get-Date).Date) { $etaFinish.ToString('HH:mm') } else { $etaFinish.ToString('MM-dd HH:mm') }
             $startText = "Loop $iteration/$effectiveWorkflowLoops - ~$(Format-UltimateDuration -Seconds $perLoopSeconds)/loop, ETA finish ~$etaClock (in $(Format-UltimateDuration -Seconds $remainingSeconds))"
         }
+        # Stash this loop's context so inner-phase progress writes keep the right loop + ETA text.
+        $script:UltimateLoopIteration = $iteration
+        $script:UltimateLoopTotal = $effectiveWorkflowLoops
+        $script:UltimateLoopText = $startText
         Set-UltimateProgress -Paths $paths -Status 'running' -CurrentLoop $iteration -TotalLoops $effectiveWorkflowLoops -DisplayText $startText -Updated (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Ultimate loop started. $startText"
 

@@ -654,16 +654,26 @@ function Set-UltimateProgress {
         [int]$CurrentLoop = 0,
         [int]$TotalLoops = 0,
         [string]$DisplayText = '',
+        # Inner-loop phase the worker is currently running (Sequence / AutoBuyCar / FindNewSubaru)
+        # and its iteration counter, so the GUI can show "第几次". Defaulting to ''/0/0 (no phase)
+        # is what the workflow-boundary / pause / completed writers leave it at -- semantically
+        # "no inner phase active right now".
+        [string]$Phase = '',
+        [int]$PhaseCurrent = 0,
+        [int]$PhaseTotal = 0,
         [string]$Updated = ''
     )
 
     Initialize-UltimateWorkspace -Paths $Paths
     $obj = [pscustomobject]@{
-        status      = $Status
-        currentLoop = $CurrentLoop
-        totalLoops  = $TotalLoops
-        displayText = $DisplayText
-        updated     = $Updated
+        status       = $Status
+        currentLoop  = $CurrentLoop
+        totalLoops   = $TotalLoops
+        displayText  = $DisplayText
+        phase        = $Phase
+        phaseCurrent = $PhaseCurrent
+        phaseTotal   = $PhaseTotal
+        updated      = $Updated
     }
     $null = Write-UltimateFileWithRetry -LiteralPath $Paths.ProgressPath -Value ($obj | ConvertTo-Json -Compress) -Encoding UTF8
 }
@@ -683,11 +693,14 @@ function Get-UltimateProgress {
         if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
         $obj = $raw | ConvertFrom-Json
         return [pscustomobject]@{
-            Status      = if (Test-UltimateConfigProperty -Object $obj -Name 'status') { [string]$obj.status } else { '' }
-            CurrentLoop = if (Test-UltimateConfigProperty -Object $obj -Name 'currentLoop') { [int]$obj.currentLoop } else { 0 }
-            TotalLoops  = if (Test-UltimateConfigProperty -Object $obj -Name 'totalLoops') { [int]$obj.totalLoops } else { 0 }
-            DisplayText = if (Test-UltimateConfigProperty -Object $obj -Name 'displayText') { [string]$obj.displayText } else { '' }
-            Updated     = if (Test-UltimateConfigProperty -Object $obj -Name 'updated') { [string]$obj.updated } else { '' }
+            Status       = if (Test-UltimateConfigProperty -Object $obj -Name 'status') { [string]$obj.status } else { '' }
+            CurrentLoop  = if (Test-UltimateConfigProperty -Object $obj -Name 'currentLoop') { [int]$obj.currentLoop } else { 0 }
+            TotalLoops   = if (Test-UltimateConfigProperty -Object $obj -Name 'totalLoops') { [int]$obj.totalLoops } else { 0 }
+            DisplayText  = if (Test-UltimateConfigProperty -Object $obj -Name 'displayText') { [string]$obj.displayText } else { '' }
+            Phase        = if (Test-UltimateConfigProperty -Object $obj -Name 'phase') { [string]$obj.phase } else { '' }
+            PhaseCurrent = if (Test-UltimateConfigProperty -Object $obj -Name 'phaseCurrent') { [int]$obj.phaseCurrent } else { 0 }
+            PhaseTotal   = if (Test-UltimateConfigProperty -Object $obj -Name 'phaseTotal') { [int]$obj.phaseTotal } else { 0 }
+            Updated      = if (Test-UltimateConfigProperty -Object $obj -Name 'updated') { [string]$obj.updated } else { '' }
         }
     }
     catch {
