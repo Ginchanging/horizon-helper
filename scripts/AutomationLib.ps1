@@ -169,6 +169,47 @@ function Get-DefaultDeleteCarSteps {
     )
 }
 
+function Get-DefaultMacroComboSteps {
+    # The compressed menu macro carried over from the former AFK subsystem. Used both as the
+    # MacroCombo automation mode and as the FindNewSubaru post-match buy sequence.
+    @(
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 2000 },
+        [pscustomobject]@{ Key = 'W'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'D'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'W'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'W'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'W'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'A'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 200 },
+        [pscustomobject]@{ Key = 'S'; WaitMilliseconds = 500 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 0 }
+    )
+}
+
 function ConvertTo-AutomationSteps {
     [CmdletBinding()]
     param(
@@ -234,6 +275,14 @@ function Get-AutomationConfig {
     $findNewBadgeText = $defaultNewBadgeText
     $findRequireTargetConfirmation = $true
     $findVerticalScanSteps = 2
+    # Former AFK key-loop modes folded into Automation: Sequence (Enter,x,x,Enter), EnterEvery10s,
+    # and MacroCombo. Their timing lives under the automation.* config now.
+    $sequenceEnterDelaySeconds = 40
+    $sequenceXDelayMilliseconds = 500
+    $sequenceLoopDelaySeconds = 10
+    $enterEvery10sDelaySeconds = 10
+    $macroComboCycleDelaySeconds = 20
+    $macroComboSteps = @(Get-DefaultMacroComboSteps)
 
     if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         $rawConfig = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
@@ -277,10 +326,34 @@ function Get-AutomationConfig {
                     $findTargetKeywords = @($find.targetKeywords | ForEach-Object { [string]$_ })
                 }
             }
+
+            if ((Test-AutomationConfigProperty -Object $automation -Name 'sequence') -and $null -ne $automation.sequence) {
+                $sequence = $automation.sequence
+                $sequenceEnterDelaySeconds = Get-AutomationConfigIntValue -Object $sequence -Name 'enterDelaySeconds' -DefaultValue $sequenceEnterDelaySeconds
+                $sequenceXDelayMilliseconds = Get-AutomationConfigIntValue -Object $sequence -Name 'xDelayMilliseconds' -DefaultValue $sequenceXDelayMilliseconds
+                $sequenceLoopDelaySeconds = Get-AutomationConfigIntValue -Object $sequence -Name 'loopDelaySeconds' -DefaultValue $sequenceLoopDelaySeconds
+            }
+
+            if ((Test-AutomationConfigProperty -Object $automation -Name 'enterEvery10s') -and $null -ne $automation.enterEvery10s) {
+                $enterEvery10sDelaySeconds = Get-AutomationConfigIntValue -Object $automation.enterEvery10s -Name 'delaySeconds' -DefaultValue $enterEvery10sDelaySeconds
+            }
+
+            if ((Test-AutomationConfigProperty -Object $automation -Name 'macroCombo') -and $null -ne $automation.macroCombo) {
+                $macroCombo = $automation.macroCombo
+                $macroComboCycleDelaySeconds = Get-AutomationConfigIntValue -Object $macroCombo -Name 'cycleDelaySeconds' -DefaultValue $macroComboCycleDelaySeconds
+                if ((Test-AutomationConfigProperty -Object $macroCombo -Name 'steps') -and $null -ne $macroCombo.steps) {
+                    $macroComboSteps = @(ConvertTo-AutomationSteps -Steps $macroCombo.steps -ConfigName 'automation.macroCombo.steps')
+                }
+            }
         }
     }
 
     $nonNegativeChecks = @(
+        @{ Name = 'automation.sequence.enterDelaySeconds'; Value = $sequenceEnterDelaySeconds },
+        @{ Name = 'automation.sequence.xDelayMilliseconds'; Value = $sequenceXDelayMilliseconds },
+        @{ Name = 'automation.sequence.loopDelaySeconds'; Value = $sequenceLoopDelaySeconds },
+        @{ Name = 'automation.enterEvery10s.delaySeconds'; Value = $enterEvery10sDelaySeconds },
+        @{ Name = 'automation.macroCombo.cycleDelaySeconds'; Value = $macroComboCycleDelaySeconds },
         @{ Name = 'automation.startupDelaySeconds'; Value = $startupDelaySeconds },
         @{ Name = 'automation.keyTapHoldMilliseconds'; Value = $keyTapHoldMilliseconds },
         @{ Name = 'automation.autoBuyCar.betweenLoopsMilliseconds'; Value = $autoBuyBetweenLoopsMilliseconds },
@@ -326,6 +399,12 @@ function Get-AutomationConfig {
         FindNewSubaruNewBadgeText        = $findNewBadgeText
         FindNewSubaruRequireTargetConfirmation = $findRequireTargetConfirmation
         FindNewSubaruVerticalScanSteps   = $findVerticalScanSteps
+        SequenceEnterDelaySeconds        = $sequenceEnterDelaySeconds
+        SequenceXDelayMilliseconds       = $sequenceXDelayMilliseconds
+        SequenceLoopDelaySeconds         = $sequenceLoopDelaySeconds
+        EnterEvery10sDelaySeconds        = $enterEvery10sDelaySeconds
+        MacroComboCycleDelaySeconds      = $macroComboCycleDelaySeconds
+        MacroComboSteps                  = @($macroComboSteps)
     }
 }
 
@@ -333,12 +412,15 @@ function Resolve-AutomationRuntimeOptions {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Config,
-        [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
+        [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru', 'Sequence', 'EnterEvery10s', 'MacroCombo')][string]$Mode = 'AutoBuyCar',
         [int]$LoopCount = -1,
         [int]$StartupDelaySeconds = -1
     )
 
-    $resolvedLoopCount = if ($LoopCount -ge 1) {
+    # LoopCount convention: -1 = not supplied (use the mode's config/default), 0 = Forever (loop
+    # until stopped), >=1 = that many cycles. The three former-AFK modes have no config loop count,
+    # so they default to Forever, matching the old AFK "run until Stop" behaviour.
+    $resolvedLoopCount = if ($LoopCount -ge 0) {
         $LoopCount
     }
     elseif ($Mode -eq 'FindNewSubaru') {
@@ -347,13 +429,16 @@ function Resolve-AutomationRuntimeOptions {
     elseif ($Mode -eq 'DeleteCar') {
         $Config.DeleteCarLoopCount
     }
-    else {
+    elseif ($Mode -eq 'AutoBuyCar') {
         $Config.AutoBuyCarLoopCount
+    }
+    else {
+        0
     }
 
     $resolvedStartupDelaySeconds = if ($StartupDelaySeconds -ge 0) { $StartupDelaySeconds } else { $Config.StartupDelaySeconds }
 
-    if ($resolvedLoopCount -lt 1) { throw "Automation loop count must be at least 1." }
+    if ($resolvedLoopCount -lt 0) { throw "Automation loop count cannot be negative (0 = forever)." }
     if ($resolvedStartupDelaySeconds -lt 0) { throw "Automation startup delay cannot be negative." }
 
     [pscustomobject]@{
@@ -375,6 +460,12 @@ function Resolve-AutomationRuntimeOptions {
         FindNewSubaruNewBadgeText    = $Config.FindNewSubaruNewBadgeText
         FindNewSubaruRequireTargetConfirmation = $Config.FindNewSubaruRequireTargetConfirmation
         FindNewSubaruVerticalScanSteps = $Config.FindNewSubaruVerticalScanSteps
+        SequenceEnterDelaySeconds    = $Config.SequenceEnterDelaySeconds
+        SequenceXDelayMilliseconds   = $Config.SequenceXDelayMilliseconds
+        SequenceLoopDelaySeconds     = $Config.SequenceLoopDelaySeconds
+        EnterEvery10sDelaySeconds    = $Config.EnterEvery10sDelaySeconds
+        MacroComboCycleDelaySeconds  = $Config.MacroComboCycleDelaySeconds
+        MacroComboSteps              = @($Config.MacroComboSteps)
     }
 }
 
@@ -1174,28 +1265,27 @@ function Invoke-AutomationKeySteps {
         $stepIndex++
         $sendResult = Send-AfkNamedKeyTap -Key $step.Key -HoldMilliseconds $KeyTapHoldMilliseconds -InputMethod $InputMethod -DryRun:$DryRun
         Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Sent key. Mode=$Mode Loop=$LoopIndex Step=$stepIndex Key=$($step.Key) WaitMs=$($step.WaitMilliseconds) InputMethod=$($sendResult.Method) Extended=$($sendResult.ExtendedKey) DownResult=$($sendResult.DownResult) UpResult=$($sendResult.UpResult) DryRun=$DryRun"
-        if ($step.WaitMilliseconds -gt 0) {
+        if ($step.WaitMilliseconds -gt 0 -and -not $DryRun) {
             Start-Sleep -Milliseconds $step.WaitMilliseconds
         }
     }
 }
 
 function Invoke-AutomationPostMatchMacroCombo {
-    # After FindNewSubaru selects a new target car, run the AFK MacroCombo (the buy
-    # sequence) once. Shared by the Automation worker and the Ultimate worker.
+    # After FindNewSubaru selects a new target car, run the MacroCombo (the buy sequence) once.
+    # Shared by the Automation worker and the Ultimate worker. Steps + key-tap hold come from the
+    # automation config (passed via $Options), not a separate AFK config.
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Paths,
-        [Parameter(Mandatory = $true)][string]$AppRoot,
+        [Parameter(Mandatory = $true)]$Options,
         [int]$LoopIndex = 1,
         [ValidateSet('SendKeys', 'SendInputScanCode', 'SendInputVirtualKey')][string]$InputMethod = 'SendKeys',
         [switch]$DryRun
     )
 
-    $afkConfig = Get-AfkConfig -AppRoot $AppRoot
-    $afkOptions = Resolve-AfkRuntimeOptions -Config $afkConfig
-    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "MacroCombo started after match. Loop=$LoopIndex Steps=$(@($afkOptions.MacroComboSteps).Count)"
-    Invoke-AutomationKeySteps -Paths $Paths -Steps $afkOptions.MacroComboSteps -Mode 'MacroComboAfterMatch' -LoopIndex $LoopIndex -KeyTapHoldMilliseconds $afkOptions.KeyTapHoldMilliseconds -InputMethod $InputMethod -DryRun:$DryRun
+    Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "MacroCombo started after match. Loop=$LoopIndex Steps=$(@($Options.MacroComboSteps).Count)"
+    Invoke-AutomationKeySteps -Paths $Paths -Steps $Options.MacroComboSteps -Mode 'MacroComboAfterMatch' -LoopIndex $LoopIndex -KeyTapHoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $InputMethod -DryRun:$DryRun
     Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "MacroCombo completed after match. Loop=$LoopIndex"
 }
 
@@ -1242,9 +1332,16 @@ function Invoke-AutomationFindNewSubaruLoop {
     }
 
     $tempRoot = Join-Path $Paths.RuntimeRoot 'automation-ocr'
-    for ($loop = 1; $loop -le $Options.LoopCount; $loop++) {
+    # LoopCount 0 = Forever (Automation only). Cap it under DryRun so dry tests cannot loop forever.
+    $isForever = ($Options.LoopCount -le 0)
+    $loopTotal = if ($isForever) { if ($DryRun) { 2 } else { [int]::MaxValue } } else { $Options.LoopCount }
+    $totalLabel = if ($isForever) { 'forever' } else { [string]$Options.LoopCount }
+    if ($isForever -and $DryRun) {
+        Write-AutomationLog -Paths $Paths -Level 'WARN' -Message 'DryRun with Forever: capping FindNewSubaru to 2 loops.'
+    }
+    for ($loop = 1; $loop -le $loopTotal; $loop++) {
         if ($PauseCheck) { & $PauseCheck }
-        if ($ProgressCallback) { & $ProgressCallback $loop $Options.LoopCount }
+        if ($ProgressCallback) { & $ProgressCallback $loop $loopTotal }
         $matched = $false
         # Consecutive attempts whose highlighted element is too small to be a real car card.
         # A real selected card highlights at ~284x217; an input desync drops the cursor onto a
@@ -1253,7 +1350,7 @@ function Invoke-AutomationFindNewSubaruLoop {
         # next workflow loop's Prelude re-homes. Used with -SoftFailOnExhaust to bail out early.
         $offGridStreak = 0
         $offGridStreakLimit = 6
-        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop started. Loop=$loop Total=$($Options.LoopCount)"
+        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop started. Loop=$loop Total=$totalLabel"
 
         for ($attempt = 1; $attempt -le $Options.FindNewSubaruMaxSearchAttempts; $attempt++) {
             $searchSendResult = Send-AfkNamedKeyTap -Key $Options.FindNewSubaruSearchKey -HoldMilliseconds $Options.KeyTapHoldMilliseconds -InputMethod $Options.InputMethod -DryRun:$DryRun
@@ -1324,7 +1421,7 @@ function Invoke-AutomationFindNewSubaruLoop {
                             Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "After-select delay $($Options.FindNewSubaruAfterSelectDelayMilliseconds)ms. Loop=$loop Attempt=$attempt VS=$vs"
                             Start-Sleep -Milliseconds $Options.FindNewSubaruAfterSelectDelayMilliseconds
                         }
-                        Invoke-AutomationPostMatchMacroCombo -Paths $Paths -AppRoot $Paths.AppRoot -LoopIndex $loop -InputMethod $Options.InputMethod -DryRun:$DryRun
+                        Invoke-AutomationPostMatchMacroCombo -Paths $Paths -Options $Options -LoopIndex $loop -InputMethod $Options.InputMethod -DryRun:$DryRun
                         $matched = $true
                         break
                     }
@@ -1354,7 +1451,7 @@ function Invoke-AutomationFindNewSubaruLoop {
                     Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "After-select delay $($Options.FindNewSubaruAfterSelectDelayMilliseconds)ms. Loop=$loop Attempt=$attempt"
                     Start-Sleep -Milliseconds $Options.FindNewSubaruAfterSelectDelayMilliseconds
                 }
-                Invoke-AutomationPostMatchMacroCombo -Paths $Paths -AppRoot $Paths.AppRoot -LoopIndex $loop -InputMethod $Options.InputMethod -DryRun:$DryRun
+                Invoke-AutomationPostMatchMacroCombo -Paths $Paths -Options $Options -LoopIndex $loop -InputMethod $Options.InputMethod -DryRun:$DryRun
                 $matched = $true
                 break
             }
@@ -1376,8 +1473,8 @@ function Invoke-AutomationFindNewSubaruLoop {
             throw $exhaustMessage
         }
 
-        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop completed. Loop=$loop Total=$($Options.LoopCount)"
-        if ($loop -lt $Options.LoopCount -and $Options.FindNewSubaruBetweenLoopsMilliseconds -gt 0) {
+        Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "FindNewSubaru loop completed. Loop=$loop Total=$totalLabel"
+        if ($loop -lt $loopTotal -and $Options.FindNewSubaruBetweenLoopsMilliseconds -gt 0) {
             Write-AutomationLog -Paths $Paths -Level 'INFO' -Message "Between-loop delay $($Options.FindNewSubaruBetweenLoopsMilliseconds)ms. Loop=$loop"
             Start-Sleep -Milliseconds $Options.FindNewSubaruBetweenLoopsMilliseconds
         }

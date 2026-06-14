@@ -7,7 +7,6 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $PSScriptRoot }
 
 . (Join-Path $scriptRoot 'scripts\BackupLib.ps1')
-. (Join-Path $scriptRoot 'scripts\FocusLib.ps1')
 . (Join-Path $scriptRoot 'scripts\AfkLib.ps1')
 . (Join-Path $scriptRoot 'scripts\AutomationLib.ps1')
 . (Join-Path $scriptRoot 'scripts\UltimateLib.ps1')
@@ -278,18 +277,6 @@ function Get-AppBackupConfig {
     Get-BackupConfig -ConfigPath $configPath
 }
 
-function Get-AppFocusPaths {
-    Get-FocusPaths -AppRoot $scriptRoot
-}
-
-function Get-AppAfkPaths {
-    Get-AfkPaths -AppRoot $scriptRoot
-}
-
-function Get-AppAfkConfig {
-    Get-AfkConfig -AppRoot $scriptRoot
-}
-
 function Get-AppAutomationPaths {
     Get-AutomationPaths -AppRoot $scriptRoot
 }
@@ -409,164 +396,9 @@ function Stop-AppBackupWatcher {
     return $state.Message
 }
 
-function Start-AppFocusLock {
-    param(
-        [Parameter(Mandatory = $true)]$Target,
-        [int]$IntervalMilliseconds = 750
-    )
-
-    $paths = Get-AppFocusPaths
-    Initialize-FocusWorkspace -Paths $paths
-
-    $state = Get-FocusLockState -Paths $paths
-    if ($state.Status -in @('Running', 'RunningUnverified')) {
-        return $state.Message
-    }
-
-    Remove-StaleFocusLockPid -Paths $paths -State $state
-    Set-FocusLockTarget -Paths $paths -Target $Target -IntervalMilliseconds $IntervalMilliseconds
-
-    $workerScript = Join-Path $scriptRoot 'scripts\KeepWindowFocused.ps1'
-    $argumentList = @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', ('"{0}"' -f $workerScript),
-        '-WindowHandle', ([string]$Target.Handle),
-        '-IntervalMilliseconds', ([string]$IntervalMilliseconds),
-        '-AppRoot', ('"{0}"' -f $scriptRoot)
-    )
-
-    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -WindowStyle Hidden -PassThru
-    $newState = $null
-    for ($attempt = 1; $attempt -le 10; $attempt++) {
-        Start-Sleep -Milliseconds 300
-        $newState = Get-FocusLockState -Paths $paths
-        if ($newState.Status -in @('Running', 'RunningUnverified') -or $process.HasExited) {
-            break
-        }
-    }
-
-    if ($newState -and $newState.Status -in @('Running', 'RunningUnverified')) {
-        return "Focus lock started. PID=$($newState.Pid)"
-    }
-
-    if ($process.HasExited) {
-        throw "Focus lock exited early. Check log: $($paths.LogPath)"
-    }
-
-    return "Focus lock process started. PID=$($process.Id)"
-}
-
-function Stop-AppFocusLock {
-    $paths = Get-AppFocusPaths
-    Initialize-FocusWorkspace -Paths $paths
-    $state = Get-FocusLockState -Paths $paths
-
-    if ($state.Status -in @('Running', 'RunningUnverified')) {
-        Stop-Process -Id $state.Pid -Force -ErrorAction Stop
-        Start-Sleep -Milliseconds 300
-        Remove-FocusLockPid -Paths $paths
-        Write-FocusLog -Paths $paths -Level 'INFO' -Message "Focus lock stopped by GUI. PID=$($state.Pid)"
-        return "Focus lock stopped. PID=$($state.Pid)"
-    }
-
-    Remove-StaleFocusLockPid -Paths $paths -State $state
-    return $state.Message
-}
-
-function Start-AppAfk {
-    param(
-        [ValidateSet('Sequence', 'EnterEvery10s', 'MacroCombo')][string]$Mode = 'Sequence'
-    )
-
-    $paths = Get-AppAfkPaths
-    Initialize-AfkWorkspace -Paths $paths
-    $afkConfig = Get-AppAfkConfig
-    $options = Resolve-AfkRuntimeOptions -Config $afkConfig
-
-    $automationPaths = Get-AppAutomationPaths
-    Initialize-AutomationWorkspace -Paths $automationPaths
-    $automationState = Get-AutomationState -Paths $automationPaths
-    if ($automationState.Status -in @('Running', 'RunningUnverified')) {
-        throw "Automation is already running. Stop Automation before starting AFK. Automation PID=$($automationState.Pid)"
-    }
-
-    $ultimatePaths = Get-AppUltimatePaths
-    Initialize-UltimateWorkspace -Paths $ultimatePaths
-    $ultimateState = Get-UltimateState -Paths $ultimatePaths
-    if ($ultimateState.Status -in @('Running', 'RunningUnverified')) {
-        throw "Ultimate is already running. Stop Ultimate before starting AFK. Ultimate PID=$($ultimateState.Pid)"
-    }
-
-    $state = Get-AfkState -Paths $paths
-    if ($state.Status -in @('Running', 'RunningUnverified')) {
-        return $state.Message
-    }
-
-    Remove-StaleAfkPid -Paths $paths -State $state
-
-    $workerScript = Join-Path $scriptRoot 'scripts\RunAfk.ps1'
-    $argumentList = @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-STA',
-        '-File', ('"{0}"' -f $workerScript),
-        '-AppRoot', ('"{0}"' -f $scriptRoot),
-        '-Mode', $Mode,
-        '-StartupDelaySeconds', ([string]$options.StartupDelaySeconds),
-        '-EnterDelaySeconds', ([string]$options.EnterDelaySeconds),
-        '-XDelayMilliseconds', ([string]$options.XDelayMilliseconds),
-        '-LoopDelaySeconds', ([string]$options.LoopDelaySeconds),
-        '-EnterOnlyDelaySeconds', ([string]$options.EnterOnlyDelaySeconds),
-        '-KeyTapHoldMilliseconds', ([string]$options.KeyTapHoldMilliseconds),
-        '-MacroComboCycleDelaySeconds', ([string]$options.MacroComboCycleDelaySeconds),
-        '-InputMethod', $options.InputMethod
-    )
-
-    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -WindowStyle Hidden -PassThru
-    $newState = $null
-    for ($attempt = 1; $attempt -le 10; $attempt++) {
-        Start-Sleep -Milliseconds 300
-        $newState = Get-AfkState -Paths $paths
-        if ($newState.Status -in @('Running', 'RunningUnverified') -or $process.HasExited) {
-            break
-        }
-    }
-
-    if ($newState -and $newState.Status -in @('Running', 'RunningUnverified')) {
-        return "AFK started. PID=$($newState.Pid). Mode=$Mode. InputMethod=$($options.InputMethod). Switch to the game window within $($options.StartupDelaySeconds) seconds."
-    }
-
-    if ($process.HasExited) {
-        throw "AFK exited early. Check log: $($paths.LogPath)"
-    }
-
-    return "AFK process started. PID=$($process.Id)"
-}
-
-function Stop-AppAfk {
-    $paths = Get-AppAfkPaths
-    Initialize-AfkWorkspace -Paths $paths
-    $state = Get-AfkState -Paths $paths
-
-    if ($state.Status -in @('Running', 'RunningUnverified')) {
-        Release-AfkKeys
-        Stop-Process -Id $state.Pid -Force -ErrorAction Stop
-        Start-Sleep -Milliseconds 300
-        Release-AfkKeys
-        Remove-AfkPid -Paths $paths
-        Write-AfkLog -Paths $paths -Level 'INFO' -Message "AFK stopped by GUI. PID=$($state.Pid) W key released."
-        return "AFK stopped. PID=$($state.Pid). W key released."
-    }
-
-    Release-AfkKeys
-    Remove-StaleAfkPid -Paths $paths -State $state
-    return "$($state.Message) W key released."
-}
-
 function Start-AppAutomation {
     param(
-        [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
+        [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru', 'Sequence', 'EnterEvery10s', 'MacroCombo')][string]$Mode = 'AutoBuyCar',
         [int]$LoopCount = -1
     )
 
@@ -574,13 +406,6 @@ function Start-AppAutomation {
     Initialize-AutomationWorkspace -Paths $paths
     $config = Get-AppAutomationConfig
     $options = Resolve-AutomationRuntimeOptions -Config $config -Mode $Mode -LoopCount $LoopCount
-
-    $afkPaths = Get-AppAfkPaths
-    Initialize-AfkWorkspace -Paths $afkPaths
-    $afkState = Get-AfkState -Paths $afkPaths
-    if ($afkState.Status -in @('Running', 'RunningUnverified')) {
-        throw "AFK is already running. Stop AFK before starting Automation. AFK PID=$($afkState.Pid)"
-    }
 
     $ultimatePaths = Get-AppUltimatePaths
     Initialize-UltimateWorkspace -Paths $ultimatePaths
@@ -662,13 +487,6 @@ function Start-AppUltimate {
     Initialize-UltimateWorkspace -Paths $paths
     $config = Get-AppUltimateConfig
     $options = Resolve-UltimateRuntimeOptions -Config $config -SequenceLoopCount $SequenceLoopCount -AutoBuyCarLoopCount $AutoBuyCarLoopCount -FindNewSubaruLoopCount $FindNewSubaruLoopCount -StartFromStep $StartFromStep -WorkflowLoopCount $WorkflowLoopCount
-
-    $afkPaths = Get-AppAfkPaths
-    Initialize-AfkWorkspace -Paths $afkPaths
-    $afkState = Get-AfkState -Paths $afkPaths
-    if ($afkState.Status -in @('Running', 'RunningUnverified')) {
-        throw "AFK is already running. Stop AFK before starting Ultimate. AFK PID=$($afkState.Pid)"
-    }
 
     $automationPaths = Get-AppAutomationPaths
     Initialize-AutomationWorkspace -Paths $automationPaths
@@ -761,49 +579,36 @@ if ($SelfTest) {
     $config = Get-AppBackupConfig
     Initialize-BackupWorkspace -Config $config
     $backupState = Get-WatcherState -Config $config
-    $focusPaths = Get-AppFocusPaths
-    Initialize-FocusWorkspace -Paths $focusPaths
-    $focusState = Get-FocusLockState -Paths $focusPaths
-    $afkPaths = Get-AppAfkPaths
-    Initialize-AfkWorkspace -Paths $afkPaths
-    $afkConfig = Get-AppAfkConfig
-    $afkOptions = Resolve-AfkRuntimeOptions -Config $afkConfig
-    $afkState = Get-AfkState -Paths $afkPaths
     $automationPaths = Get-AppAutomationPaths
     Initialize-AutomationWorkspace -Paths $automationPaths
     $automationConfig = Get-AppAutomationConfig
     $autoBuyOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'AutoBuyCar'
     $deleteCarOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'DeleteCar'
     $findOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'FindNewSubaru'
+    $macroComboOptions = Resolve-AutomationRuntimeOptions -Config $automationConfig -Mode 'MacroCombo'
     $automationState = Get-AutomationState -Paths $automationPaths
     $ultimatePaths = Get-AppUltimatePaths
     Initialize-UltimateWorkspace -Paths $ultimatePaths
     $ultimateConfig = Get-AppUltimateConfig
     $ultimateOptions = Resolve-UltimateRuntimeOptions -Config $ultimateConfig
     $ultimateState = Get-UltimateState -Paths $ultimatePaths
-    $windowCount = @(Get-FocusWindowList).Count
 
     Write-Host 'Horizon6 Helper self-test passed.'
     Write-Host "Source: $($config.SourcePath)"
     Write-Host "Backups: $($config.BackupRoot)"
     Write-Host "Auto backup status: $($backupState.Status)"
-    Write-Host "Focus lock status: $($focusState.Status)"
-    Write-Host "AFK status: $($afkState.Status)"
-    Write-Host "AFK startup delay: $($afkOptions.StartupDelaySeconds)"
-    Write-Host "AFK input method: $($afkOptions.InputMethod)"
-    Write-Host "AFK MacroCombo steps: $(@($afkOptions.MacroComboSteps).Count)"
     Write-Host "Automation status: $($automationState.Status)"
-    Write-Host "AutoBuyCar loop count: $($autoBuyOptions.LoopCount)"
     Write-Host "Automation input method: $($autoBuyOptions.InputMethod)"
+    Write-Host "AutoBuyCar loop count: $($autoBuyOptions.LoopCount)"
     Write-Host "DeleteCar loop count: $($deleteCarOptions.LoopCount)"
     Write-Host "DeleteCar steps: $(@($deleteCarOptions.DeleteCarSteps).Count)"
     Write-Host "FindNewSubaru max attempts: $($findOptions.FindNewSubaruMaxSearchAttempts)"
     Write-Host "FindNewSubaru after-select delay: $($findOptions.FindNewSubaruAfterSelectDelayMilliseconds) ms"
+    Write-Host "MacroCombo steps: $(@($macroComboOptions.MacroComboSteps).Count)"
     Write-Host "Ultimate status: $($ultimateState.Status)"
     Write-Host "Ultimate share code: $($ultimateOptions.ShareCode)"
     Write-Host "Ultimate sequence loops: $($ultimateOptions.SequenceLoopCount)"
     Write-Host "Ultimate target keywords: $($ultimateOptions.TargetKeywords -join ', ')"
-    Write-Host "Visible windows: $windowCount"
     exit 0
 }
 
@@ -976,11 +781,9 @@ function Select-AppPage {
 $script:NavFont = New-Object System.Drawing.Font('Segoe UI', 10)
 
 # Ultimate is the primary workflow -> first nav item, selected at startup.
-# Icon glyphs are Segoe MDL2 Assets codepoints (lightning/save/lock/clock/wrench).
+# Icon glyphs are Segoe MDL2 Assets codepoints (lightning/save/wrench).
 $ultimateTab = New-AppPage -Key 'Ultimate' -Label 'Ultimate' -Icon ([string][char]0xE945)
 $backupTab = New-AppPage -Key 'Backup' -Label 'Backup' -Icon ([string][char]0xE74E)
-$focusTab = New-AppPage -Key 'Focus' -Label 'Focus Lock' -Icon ([string][char]0xE72E)
-$afkTab = New-AppPage -Key 'Afk' -Label 'AFK' -Icon ([string][char]0xE823)
 $automationTab = New-AppPage -Key 'Automation' -Label 'Automation' -Icon ([string][char]0xE90F)
 
 # ---------------------------- Backup tab ----------------------------
@@ -1082,133 +885,6 @@ $backupLogBox.BorderStyle = [System.Windows.Forms.BorderStyle]::None
 $backupLogCard.Controls.Add($backupLogBox)
 Add-AppRow -Table $backupTable -Control $backupLogCard -Fill
 
-# ---------------------------- Focus Lock tab ----------------------------
-$focusTable = New-AppTabTable -Tab $focusTab
-
-$focusStatusCard = New-AppCard -Title 'Focus Lock'
-$focusStatusLabel = New-Object System.Windows.Forms.Label
-$focusStatusLabel.Location = New-Object System.Drawing.Point(14, 40)
-$focusStatusLabel.Size = New-Object System.Drawing.Size(790, 22)
-$focusStatusLabel.Anchor = $anchorTLR
-$focusStatusLabel.Text = 'Status: loading...'
-$focusStatusLabel.Tag = 'status'
-$focusStatusLabel.ForeColor = $Theme.Muted
-$focusStatusCard.Controls.Add($focusStatusLabel)
-
-$focusTargetLabel = New-Object System.Windows.Forms.Label
-$focusTargetLabel.Location = New-Object System.Drawing.Point(14, 66)
-$focusTargetLabel.Size = New-Object System.Drawing.Size(790, 22)
-$focusTargetLabel.Anchor = $anchorTLR
-$focusTargetLabel.Text = 'Target: none'
-$focusStatusCard.Controls.Add($focusTargetLabel)
-Add-AppRow -Table $focusTable -Control $focusStatusCard -Height 96
-
-$focusWindowsCard = New-AppCard -Title 'Windows'
-$windowList = New-Object System.Windows.Forms.ListView
-$windowList.Dock = [System.Windows.Forms.DockStyle]::Fill
-$windowList.View = [System.Windows.Forms.View]::Details
-$windowList.FullRowSelect = $true
-$windowList.MultiSelect = $false
-$windowList.HideSelection = $false
-$windowList.BackColor = $Theme.LogBg
-$windowList.ForeColor = $Theme.Text
-$windowList.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-[void]$windowList.Columns.Add('PID', 80)
-[void]$windowList.Columns.Add('Process', 150)
-[void]$windowList.Columns.Add('Title', 420)
-[void]$windowList.Columns.Add('Handle', 110)
-$focusWindowsCard.Controls.Add($windowList)
-Add-AppRow -Table $focusTable -Control $focusWindowsCard -Fill
-
-$focusButtonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$focusButtonPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$focusButtonPanel.Margin = New-Object System.Windows.Forms.Padding(0)
-$focusButtonPanel.BackColor = $Theme.Bg
-$focusButtonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
-$focusButtonPanel.WrapContents = $true
-
-$refreshWindowsButton = New-AppButton -Text 'Refresh Windows' -Role Neutral -Icon ([string][char]0xE72C)
-$startFocusButton = New-AppButton -Text 'Start Focus Lock' -Role Primary -Icon ([string][char]0xE768)
-$stopFocusButton = New-AppButton -Text 'Stop Focus Lock' -Role Danger -Icon ([string][char]0xE71A)
-$refreshFocusButton = New-AppButton -Text 'Refresh Status' -Role Neutral -Icon ([string][char]0xE72C)
-$openFocusLogButton = New-AppButton -Text 'Open Focus Log' -Role Neutral -Icon ([string][char]0xE838)
-@($refreshWindowsButton, $startFocusButton, $stopFocusButton, $refreshFocusButton, $openFocusLogButton) |
-    ForEach-Object { $focusButtonPanel.Controls.Add($_) }
-Add-AppRow -Table $focusTable -Control $focusButtonPanel -Height 52
-
-# ---------------------------- AFK tab ----------------------------
-$afkTable = New-AppTabTable -Tab $afkTab
-
-$afkStatusCard = New-AppCard -Title 'AFK'
-$afkStatusLabel = New-Object System.Windows.Forms.Label
-$afkStatusLabel.Location = New-Object System.Drawing.Point(14, 40)
-$afkStatusLabel.Size = New-Object System.Drawing.Size(790, 22)
-$afkStatusLabel.Anchor = $anchorTLR
-$afkStatusLabel.Text = 'Status: loading...'
-$afkStatusLabel.Tag = 'status'
-$afkStatusLabel.ForeColor = $Theme.Muted
-$afkStatusCard.Controls.Add($afkStatusLabel)
-Add-AppRow -Table $afkTable -Control $afkStatusCard -Height 70
-
-$afkSettingsCard = New-AppCard -Title 'Mode'
-$afkModeLabel = New-Object System.Windows.Forms.Label
-$afkModeLabel.Location = New-Object System.Drawing.Point(14, 42)
-$afkModeLabel.Size = New-Object System.Drawing.Size(100, 24)
-$afkModeLabel.Text = 'AFK mode'
-$afkSettingsCard.Controls.Add($afkModeLabel)
-
-$afkModeCombo = New-Object System.Windows.Forms.ComboBox
-$afkModeCombo.Location = New-Object System.Drawing.Point(118, 40)
-$afkModeCombo.Size = New-Object System.Drawing.Size(260, 24)
-$afkModeCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-[void]$afkModeCombo.Items.Add('Sequence')
-[void]$afkModeCombo.Items.Add('EnterEvery10s')
-[void]$afkModeCombo.Items.Add('MacroCombo')
-$afkModeCombo.SelectedIndex = 0
-$afkSettingsCard.Controls.Add($afkModeCombo)
-Add-AppRow -Table $afkTable -Control $afkSettingsCard -Height 64
-
-$afkAboutCard = New-AppCard -Title 'About'
-$afkInfoBox = New-Object System.Windows.Forms.TextBox
-$afkInfoBox.Dock = [System.Windows.Forms.DockStyle]::Fill
-$afkInfoBox.Multiline = $true
-$afkInfoBox.ReadOnly = $true
-$afkInfoBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-$afkInfoBox.BackColor = $Theme.Card
-$afkInfoBox.ForeColor = $Theme.Muted
-$afkInfoBox.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-$afkInfoBox.Text = "AFK sends keys to the current foreground window. Before starting, switch to the game within the configured countdown.`r`nAFK timing values and input method are read from config.json: startup delay, Sequence waits, EnterEvery10s delay, key tap hold time, MacroCombo steps, MacroCombo cycle delay, and afk.inputMethod.`r`nStop AFK also sends a W key-up as a safety fallback."
-$afkAboutCard.Controls.Add($afkInfoBox)
-Add-AppRow -Table $afkTable -Control $afkAboutCard -Height 116
-
-$afkButtonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$afkButtonPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$afkButtonPanel.Margin = New-Object System.Windows.Forms.Padding(0)
-$afkButtonPanel.BackColor = $Theme.Bg
-$afkButtonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
-$afkButtonPanel.WrapContents = $true
-
-$startAfkButton = New-AppButton -Text 'Start AFK' -Role Primary -Icon ([string][char]0xE768)
-$stopAfkButton = New-AppButton -Text 'Stop AFK' -Role Danger -Icon ([string][char]0xE71A)
-$refreshAfkButton = New-AppButton -Text 'Refresh Status' -Role Neutral -Icon ([string][char]0xE72C)
-$openAfkLogButton = New-AppButton -Text 'Open AFK Log' -Role Neutral -Icon ([string][char]0xE838)
-@($startAfkButton, $stopAfkButton, $refreshAfkButton, $openAfkLogButton) |
-    ForEach-Object { $afkButtonPanel.Controls.Add($_) }
-Add-AppRow -Table $afkTable -Control $afkButtonPanel -Height 52
-
-$afkLogCard = New-AppCard -Title 'Recent log'
-$afkLogBox = New-Object System.Windows.Forms.TextBox
-$afkLogBox.Dock = [System.Windows.Forms.DockStyle]::Fill
-$afkLogBox.Multiline = $true
-$afkLogBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
-$afkLogBox.ReadOnly = $true
-$afkLogBox.BackColor = $Theme.LogBg
-$afkLogBox.ForeColor = $Theme.Text
-$afkLogBox.Font = $MonoFont
-$afkLogBox.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-$afkLogCard.Controls.Add($afkLogBox)
-Add-AppRow -Table $afkTable -Control $afkLogCard -Fill
-
 # ---------------------------- Automation tab ----------------------------
 $automationTable = New-AppTabTable -Tab $automationTab
 
@@ -1223,7 +899,7 @@ $automationStatusLabel.ForeColor = $Theme.Muted
 $automationStatusCard.Controls.Add($automationStatusLabel)
 Add-AppRow -Table $automationTable -Control $automationStatusCard -Height 70
 
-$automationSettingsCard = New-AppCard -Title 'Mode & loops'
+$automationSettingsCard = New-AppCard -Title 'Mode and loops'
 $automationModeLabel = New-Object System.Windows.Forms.Label
 $automationModeLabel.Location = New-Object System.Drawing.Point(14, 42)
 $automationModeLabel.Size = New-Object System.Drawing.Size(48, 24)
@@ -1237,6 +913,9 @@ $automationModeCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropD
 [void]$automationModeCombo.Items.Add('AutoBuyCar')
 [void]$automationModeCombo.Items.Add('DeleteCar')
 [void]$automationModeCombo.Items.Add('FindNewSubaru')
+[void]$automationModeCombo.Items.Add('Sequence')
+[void]$automationModeCombo.Items.Add('EnterEvery10s')
+[void]$automationModeCombo.Items.Add('MacroCombo')
 $automationModeCombo.SelectedIndex = 0
 $automationSettingsCard.Controls.Add($automationModeCombo)
 
@@ -1250,10 +929,21 @@ $automationLoopInput = New-Object System.Windows.Forms.NumericUpDown
 $automationLoopInput.Location = New-Object System.Drawing.Point(400, 40)
 $automationLoopInput.Size = New-Object System.Drawing.Size(100, 24)
 $automationLoopInput.Minimum = 1
-$automationLoopInput.Maximum = 999
+$automationLoopInput.Maximum = 9999
 $automationLoopInput.Value = 1
 $automationSettingsCard.Controls.Add($automationLoopInput)
-Add-AppRow -Table $automationTable -Control $automationSettingsCard -Height 64
+
+# Forever = loop until Stop (LoopCount 0 = infinite). Mirrors the Ultimate tab's Forever toggle.
+$automationForever = New-Object System.Windows.Forms.CheckBox
+$automationForever.Location = New-Object System.Drawing.Point(516, 42)
+$automationForever.Size = New-Object System.Drawing.Size(80, 24)
+$automationForever.Text = 'Forever'
+$automationSettingsCard.Controls.Add($automationForever)
+# Disable the loop-count box while "Forever" is checked (infinite has no count).
+$automationForever.Add_CheckedChanged({
+    $automationLoopInput.Enabled = -not $automationForever.Checked
+})
+Add-AppRow -Table $automationTable -Control $automationSettingsCard -Height 88
 
 $automationAboutCard = New-AppCard -Title 'About'
 $automationInfoBox = New-Object System.Windows.Forms.TextBox
@@ -1264,7 +954,7 @@ $automationInfoBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
 $automationInfoBox.BackColor = $Theme.Card
 $automationInfoBox.ForeColor = $Theme.Muted
 $automationInfoBox.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-$automationInfoBox.Text = "Automation sends keys to the current foreground game window after a countdown.`r`nDefault input method is SendKeys, matching the original simple AFK script more closely. You can change automation.inputMethod in config.json.`r`nAutoBuyCar repeats: Space, Down, Enter, Enter, Enter with configured waits.`r`nDeleteCar repeats the configured Enter/S menu sequence for the chosen loop count.`r`nFindNewSubaru searches left until it finds a new 1998 Subaru, selects it, waits for the configured delay, then runs AFK MacroCombo."
+$automationInfoBox.Text = "Automation sends keys to the current foreground game window after a countdown. Input method is SendKeys (change automation.inputMethod in config.json). Pick a mode, set Loop count, or tick Forever to loop until you press Stop.`r`nAutoBuyCar repeats: Space, Down, Enter, Enter, Enter with configured waits.`r`nDeleteCar repeats the configured Enter/S menu sequence.`r`nFindNewSubaru searches until it finds a new 1998 Subaru, selects it, waits, then runs the MacroCombo buy macro.`r`nSequence (Enter, x, x, Enter), EnterEvery10s, and MacroCombo are the former AFK key loops; each cycle counts as one loop."
 $automationAboutCard.Controls.Add($automationInfoBox)
 Add-AppRow -Table $automationTable -Control $automationAboutCard -Height 130
 
@@ -1504,7 +1194,7 @@ $ultimateInfoBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
 $ultimateInfoBox.BackColor = $Theme.Card
 $ultimateInfoBox.ForeColor = $Theme.Muted
 $ultimateInfoBox.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-$ultimateInfoBox.Text = "Ultimate is an independent workflow. It sends the configured menu macro, enters the share code, searches for the strict OCR target, selects it, runs its own Sequence loops, then a post-sequence macro, the AutoBuyCar sequence, a post-buy macro, and finally the FindNewSubaru search-and-buy loop.`r`nUltimate loops = how many times to repeat the WHOLE workflow; tick Forever for an unlimited loop (runs until you press Stop). The status line shows the current loop and an estimated finish time.`r`nSet Sequence / AutoBuyCar / FindNewSubaru loops above. AutoBuyCar and FindNewSubaru reuse the automation.* steps from config.json.`r`nDebug step (5-14) skips earlier phases for testing - the game must already be at the UI state that step expects. Leave it at 5 for a full run.`r`nThe status line also shows the cumulative cars AutoBuyCar has bought (kept across runs); Clear Count resets it. AFK and Automation cannot run at the same time as Ultimate."
+$ultimateInfoBox.Text = "Ultimate is an independent workflow. It sends the configured menu macro, enters the share code, searches for the strict OCR target, selects it, runs its own Sequence loops, then a post-sequence macro, the AutoBuyCar sequence, a post-buy macro, and finally the FindNewSubaru search-and-buy loop.`r`nUltimate loops = how many times to repeat the WHOLE workflow; tick Forever for an unlimited loop (runs until you press Stop). The status line shows the current loop and an estimated finish time.`r`nSet Sequence / AutoBuyCar / FindNewSubaru loops above. AutoBuyCar and FindNewSubaru reuse the automation.* steps from config.json.`r`nDebug step (5-14) skips earlier phases for testing - the game must already be at the UI state that step expects. Leave it at 5 for a full run.`r`nThe status line also shows the cumulative cars AutoBuyCar has bought (kept across runs); Clear Count resets it. Automation cannot run at the same time as Ultimate."
 $ultimateAboutCard.Controls.Add($ultimateInfoBox)
 Add-AppRow -Table $ultimateTable -Control $ultimateAboutCard -Height 132
 
@@ -1625,68 +1315,6 @@ function Refresh-BackupPanel {
     }
 }
 
-function Refresh-FocusPanel {
-    Invoke-AppSafely -FailureTitle 'Focus Status' -Action {
-        $paths = Get-AppFocusPaths
-        Initialize-FocusWorkspace -Paths $paths
-        $state = Get-FocusLockState -Paths $paths
-        $target = Get-FocusLockTarget -Paths $paths
-
-        Set-AppStatusLabel -Label $focusStatusLabel -Status $state.Status -Text "Status: $($state.Status) - $($state.Message)"
-        if ($target) {
-            $windowExists = [bool](Get-WindowInfoByHandle -WindowHandle ([Int64]$target.Handle))
-            $focusTargetLabel.Text = "Target: [$($target.ProcessId)] $($target.ProcessName) - $($target.Title) - Exists: $windowExists"
-        }
-        else {
-            $focusTargetLabel.Text = 'Target: none'
-        }
-
-        Set-AppStatusText 'Focus status refreshed.'
-    }
-}
-
-function Refresh-WindowList {
-    Invoke-AppSafely -FailureTitle 'Window List' -Action {
-        $windowList.Items.Clear()
-        $windows = @(Get-FocusWindowList)
-        foreach ($window in $windows) {
-            $item = New-Object System.Windows.Forms.ListViewItem([string]$window.ProcessId)
-            [void]$item.SubItems.Add([string]$window.ProcessName)
-            [void]$item.SubItems.Add([string]$window.Title)
-            [void]$item.SubItems.Add([string]$window.HandleHex)
-            $item.Tag = $window
-            [void]$windowList.Items.Add($item)
-        }
-
-        Set-AppStatusText "Loaded $($windows.Count) visible windows."
-    }
-}
-
-function Update-AfkLogPreview {
-    param($Paths)
-
-    if (Test-Path -LiteralPath $Paths.LogPath -PathType Leaf) {
-        $afkLogBox.Text = ((Get-Content -LiteralPath $Paths.LogPath -Tail 80 -Encoding UTF8) -join [Environment]::NewLine)
-    }
-    else {
-        $afkLogBox.Text = 'No AFK log yet.'
-    }
-}
-
-function Refresh-AfkPanel {
-    Invoke-AppSafely -FailureTitle 'AFK Status' -Action {
-        $paths = Get-AppAfkPaths
-        Initialize-AfkWorkspace -Paths $paths
-        $afkConfig = Get-AppAfkConfig
-        $options = Resolve-AfkRuntimeOptions -Config $afkConfig
-        $state = Get-AfkState -Paths $paths
-
-        Set-AppStatusLabel -Label $afkStatusLabel -Status $state.Status -Text "Status: $($state.Status) - Input=$($options.InputMethod), Startup=$($options.StartupDelaySeconds)s Sequence=$($options.EnterDelaySeconds)s/$($options.XDelayMilliseconds)ms/$($options.LoopDelaySeconds)s EnterEvery=$($options.EnterOnlyDelaySeconds)s MacroDelay=$($options.MacroComboCycleDelaySeconds)s"
-        Update-AfkLogPreview -Paths $paths
-        Set-AppStatusText 'AFK status refreshed.'
-    }
-}
-
 function Update-AutomationLogPreview {
     param($Paths)
 
@@ -1707,8 +1335,16 @@ function Set-AutomationLoopDefault {
 
         $config = Get-AppAutomationConfig
         $options = Resolve-AutomationRuntimeOptions -Config $config -Mode $mode
-        $value = [Math]::Min([decimal]$automationLoopInput.Maximum, [Math]::Max([decimal]$automationLoopInput.Minimum, [decimal]$options.LoopCount))
-        $automationLoopInput.Value = $value
+        # A configured loop count of 0 means "infinite" -> tick Forever; otherwise seed the count box.
+        if ([int]$options.LoopCount -le 0) {
+            $automationForever.Checked = $true
+        }
+        else {
+            $automationForever.Checked = $false
+            $value = [Math]::Min([decimal]$automationLoopInput.Maximum, [Math]::Max([decimal]$automationLoopInput.Minimum, [decimal]$options.LoopCount))
+            $automationLoopInput.Value = $value
+        }
+        $automationLoopInput.Enabled = -not $automationForever.Checked
     }
 }
 
@@ -1785,8 +1421,6 @@ function Update-AppRunningMap {
     $map = @{
         Ultimate   = (Get-AppUltimatePaths).PidPath
         Backup     = (Get-AppBackupConfig).PidPath
-        Focus      = (Get-AppFocusPaths).PidPath
-        Afk        = (Get-AppAfkPaths).PidPath
         Automation = (Get-AppAutomationPaths).PidPath
     }
     foreach ($key in $map.Keys) {
@@ -2002,87 +1636,6 @@ $openBackupLogButton.Add_Click({
     }
 })
 
-$refreshWindowsButton.Add_Click({ Refresh-WindowList })
-$refreshFocusButton.Add_Click({ Refresh-FocusPanel })
-$startFocusButton.Add_Click({
-    Invoke-AppSafely -FailureTitle 'Start Focus Lock' -Action {
-        if ($windowList.SelectedItems.Count -lt 1) {
-            throw 'Select a window first.'
-        }
-
-        $target = $windowList.SelectedItems[0].Tag
-        $message = Start-AppFocusLock -Target $target
-        Set-AppStatusText $message
-        Refresh-FocusPanel
-        Show-AppMessage -Message $message
-    }
-})
-$stopFocusButton.Add_Click({
-    Invoke-AppSafely -FailureTitle 'Stop Focus Lock' -Action {
-        $message = Stop-AppFocusLock
-        Set-AppStatusText $message
-        Refresh-FocusPanel
-        Show-AppMessage -Message $message
-    }
-})
-$openFocusLogButton.Add_Click({
-    Invoke-AppSafely -FailureTitle 'Open Focus Log' -Action {
-        $paths = Get-AppFocusPaths
-        Initialize-FocusWorkspace -Paths $paths
-        Open-AppPath -Path $paths.LogPath -EnsureFile
-    }
-})
-
-$refreshAfkButton.Add_Click({ Refresh-AfkPanel })
-$startAfkButton.Add_Click({
-    Invoke-AppSafely -FailureTitle 'Start AFK' -Action {
-        $mode = [string]$afkModeCombo.SelectedItem
-        if ([string]::IsNullOrWhiteSpace($mode)) {
-            $mode = 'Sequence'
-        }
-        $afkConfig = Get-AppAfkConfig
-        $options = Resolve-AfkRuntimeOptions -Config $afkConfig
-        if ($mode -eq 'EnterEvery10s') {
-            $sequenceText = "Sequence: Enter every $($options.EnterOnlyDelaySeconds) seconds. Input=$($options.InputMethod)."
-        }
-        elseif ($mode -eq 'MacroCombo') {
-            $sequenceText = "Sequence: compressed menu macro. Steps=$(@($options.MacroComboSteps).Count), tap hold=$($options.KeyTapHoldMilliseconds)ms, cycle delay=$($options.MacroComboCycleDelaySeconds)s, input=$($options.InputMethod)."
-        }
-        else {
-            $sequenceText = "Sequence: Enter, wait $($options.EnterDelaySeconds)s, x, wait $($options.XDelayMilliseconds)ms, x, wait $($options.XDelayMilliseconds)ms, Enter, wait $($options.LoopDelaySeconds)s, repeat. Input=$($options.InputMethod)."
-        }
-        $confirmation = [System.Windows.Forms.MessageBox]::Show(
-            "AFK will send keys to the current foreground window.`r`n`r`nAfter clicking OK, switch to the game window within $($options.StartupDelaySeconds) seconds.`r`n`r`nMode: $mode`r`n$sequenceText",
-            'Start AFK',
-            [System.Windows.Forms.MessageBoxButtons]::OKCancel,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        )
-        if ($confirmation -ne [System.Windows.Forms.DialogResult]::OK) {
-            return
-        }
-
-        $message = Start-AppAfk -Mode $mode
-        Set-AppStatusText $message
-        Refresh-AfkPanel
-        Show-AppMessage -Message $message
-    }
-})
-$stopAfkButton.Add_Click({
-    Invoke-AppSafely -FailureTitle 'Stop AFK' -Action {
-        $message = Stop-AppAfk
-        Set-AppStatusText $message
-        Refresh-AfkPanel
-        Show-AppMessage -Message $message
-    }
-})
-$openAfkLogButton.Add_Click({
-    Invoke-AppSafely -FailureTitle 'Open AFK Log' -Action {
-        $paths = Get-AppAfkPaths
-        Initialize-AfkWorkspace -Paths $paths
-        Open-AppPath -Path $paths.LogPath -EnsureFile
-    }
-})
-
 $automationModeCombo.Add_SelectedIndexChanged({
     Set-AutomationLoopDefault
 })
@@ -2094,16 +1647,18 @@ $startAutomationButton.Add_Click({
             $mode = 'AutoBuyCar'
         }
 
+        # Forever -> LoopCount 0 (infinite, loop until Stop); otherwise the numeric box value.
+        $requestedLoops = if ($automationForever.Checked) { 0 } else { [int]$automationLoopInput.Value }
         $config = Get-AppAutomationConfig
-        $options = Resolve-AutomationRuntimeOptions -Config $config -Mode $mode -LoopCount ([int]$automationLoopInput.Value)
-        if ($mode -eq 'AutoBuyCar') {
-            $sequenceText = "AutoBuyCar will run $($options.LoopCount) loop(s). Steps=$(@($options.AutoBuyCarSteps).Count), between loops=$($options.AutoBuyCarBetweenLoopsMilliseconds)ms, input=$($options.InputMethod)."
-        }
-        elseif ($mode -eq 'DeleteCar') {
-            $sequenceText = "DeleteCar will run $($options.LoopCount) loop(s). Steps=$(@($options.DeleteCarSteps).Count), between loops=$($options.DeleteCarBetweenLoopsMilliseconds)ms, input=$($options.InputMethod)."
-        }
-        else {
-            $sequenceText = "FindNewSubaru will run $($options.LoopCount) loop(s). Search key=$($options.FindNewSubaruSearchKey), max attempts=$($options.FindNewSubaruMaxSearchAttempts), input=$($options.InputMethod), after-select delay=$($options.FindNewSubaruAfterSelectDelayMilliseconds)ms. OCR confirmation=$($options.FindNewSubaruRequireTargetConfirmation)."
+        $options = Resolve-AutomationRuntimeOptions -Config $config -Mode $mode -LoopCount $requestedLoops
+        $loopText = if ([int]$options.LoopCount -le 0) { 'forever (until Stop)' } else { "$($options.LoopCount) loop(s)" }
+        switch ($mode) {
+            'AutoBuyCar'    { $sequenceText = "AutoBuyCar will run $loopText. Steps=$(@($options.AutoBuyCarSteps).Count), between loops=$($options.AutoBuyCarBetweenLoopsMilliseconds)ms, input=$($options.InputMethod)." }
+            'DeleteCar'     { $sequenceText = "DeleteCar will run $loopText. Steps=$(@($options.DeleteCarSteps).Count), between loops=$($options.DeleteCarBetweenLoopsMilliseconds)ms, input=$($options.InputMethod)." }
+            'FindNewSubaru' { $sequenceText = "FindNewSubaru will run $loopText. Search key=$($options.FindNewSubaruSearchKey), max attempts=$($options.FindNewSubaruMaxSearchAttempts), input=$($options.InputMethod), after-select delay=$($options.FindNewSubaruAfterSelectDelayMilliseconds)ms. OCR confirmation=$($options.FindNewSubaruRequireTargetConfirmation)." }
+            'EnterEvery10s' { $sequenceText = "EnterEvery10s will run $loopText. Enter every $($options.EnterOnlyDelaySeconds)s. Input=$($options.InputMethod)." }
+            'MacroCombo'    { $sequenceText = "MacroCombo will run $loopText. Steps=$(@($options.MacroComboSteps).Count), cycle delay=$($options.MacroComboCycleDelaySeconds)s, input=$($options.InputMethod)." }
+            default         { $sequenceText = "Sequence will run $loopText. Enter, wait $($options.EnterDelaySeconds)s, x, x (wait $($options.XDelayMilliseconds)ms each), Enter, wait $($options.LoopDelaySeconds)s. Input=$($options.InputMethod)." }
         }
 
         $confirmation = [System.Windows.Forms.MessageBox]::Show(
@@ -2116,7 +1671,7 @@ $startAutomationButton.Add_Click({
             return
         }
 
-        $message = Start-AppAutomation -Mode $mode -LoopCount ([int]$automationLoopInput.Value)
+        $message = Start-AppAutomation -Mode $mode -LoopCount $requestedLoops
         Set-AppStatusText $message
         Refresh-AutomationPanel
         Show-AppMessage -Message $message
@@ -2250,13 +1805,10 @@ $form.Add_Shown({
     Select-AppPage -Key 'Ultimate'
     try { Update-AppRunningMap } catch { }
     Refresh-BackupPanel
-    Refresh-FocusPanel
-    Refresh-AfkPanel
     Refresh-AutomationPanel
     Refresh-UltimatePanel
     Set-AutomationLoopDefault
     Set-UltimateLoopDefault
-    Refresh-WindowList
     $uiTimer.Start()
 })
 $form.Add_FormClosing({ $uiTimer.Stop() })

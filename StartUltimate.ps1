@@ -29,14 +29,6 @@ if ($state.Status -in @('Running', 'RunningUnverified')) {
 }
 Remove-StaleUltimatePid -Paths $paths -State $state
 
-$afkPaths = Get-AfkPaths -AppRoot $scriptRoot
-Initialize-AfkWorkspace -Paths $afkPaths
-$afkState = Get-AfkState -Paths $afkPaths
-if ($afkState.Status -in @('Running', 'RunningUnverified')) {
-    Write-Error "AFK is already running. Stop AFK before starting Ultimate. AFK PID=$($afkState.Pid)"
-    exit 1
-}
-
 $automationPaths = Get-AutomationPaths -AppRoot $scriptRoot
 Initialize-AutomationWorkspace -Paths $automationPaths
 $automationState = Get-AutomationState -Paths $automationPaths

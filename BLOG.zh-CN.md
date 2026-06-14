@@ -15,10 +15,8 @@ C:\XboxGames\GameSave\pgs
 - 自动备份：监听存档目录变化，等待写入稳定后自动备份。
 - 手动备份：支持一键立即备份。
 - 保留策略：默认只保留最近 30 份备份，避免无限占用磁盘。
-- 窗口焦点锁定：可以选择一个 Windows 窗口，并尝试让它持续保持焦点。
-- 游戏挂机：可以选择按键循环模式，按脚本逻辑发送 `Enter` 和 `x`，每 10 秒按一次 `Enter`，或执行一套菜单宏。
-- 车辆自动化：提供 `AutoBuyCar` 和 `FindNewSubaru` 两个独立自动化流程，可配置循环次数。
-- Ultimate 终极流程：输入分享代码，OCR 查找 `1998 斯巴鲁 S1 790`，选中后执行 80 轮独立 Sequence。
+- 车辆 / 按键自动化：一个 `Automation` 页里集中六个模式——`AutoBuyCar`、`DeleteCar`、`FindNewSubaru`，以及按键循环 `Sequence`、`EnterEvery10s`、`MacroCombo`。每个模式都能设置循环次数，或勾选 Forever 循环到手动停止。
+- Ultimate 终极流程：输入分享代码，OCR 查找 `1998 斯巴鲁 S1 790`，选中后执行多轮独立 Sequence。
 - 无额外依赖：基于 Windows 自带的 PowerShell 5.1，不需要 Python、Node.js 或 .NET SDK。
 
 ## 适合谁使用
@@ -29,8 +27,7 @@ C:\XboxGames\GameSave\pgs
 - 不完全放心云存档，想多留一份本地保险。
 - 想在尝试不同路线、选择、构筑之前留存档快照。
 - 想把备份工具放在 U 盘、移动硬盘或固定工具目录中便携使用。
-- 需要一个简单的窗口焦点锁定辅助功能。
-- 需要一个简单的游戏挂机按键循环。
+- 需要一个简单的游戏按键循环（`Sequence` / `EnterEvery10s` / `MacroCombo`）。
 - 需要重复执行买车、筛选“全新 1998 斯巴鲁”，或执行分享代码选车后的长循环操作。
 
 它不是云同步工具，也不是存档修改器。它只负责读取指定目录，并把内容复制、压缩成 zip 备份。
@@ -49,12 +46,10 @@ gamesave-guardian-v1.5.0.zip
 GameSaveGuardian.cmd
 ```
 
-打开后会看到五个主要页面：
+打开后会看到三个主要页面：
 
 - `Backup`：管理存档备份。
-- `Focus Lock`：管理窗口焦点锁定。
-- `AFK`：管理游戏挂机按键循环。
-- `Automation`：管理车辆自动化流程。
+- `Automation`：六个模式的车辆 / 按键自动化（含原 AFK 的 `Sequence` / `EnterEvery10s` / `MacroCombo`），可设循环次数或 Forever。
 - `Ultimate`：管理终极分享代码和 OCR 选车流程。
 
 推荐普通用户只使用图形界面。项目里仍然保留了多个 `.cmd` / `.ps1` 脚本入口，主要是给高级用户或排查问题时使用。
@@ -177,51 +172,25 @@ config.json
 - `backupRoot`：备份输出目录。默认 `backups` 表示程序所在文件夹下的 `backups`。
 - `debounceSeconds`：检测到变化后等待多少秒再备份。
 - `maxBackups`：最多保留多少份备份。设置为 `0` 表示不自动删除旧备份。
-- `afk.startupDelaySeconds`：启动 AFK 后等待多少秒再开始发按键。
-- `afk.keyTapHoldMilliseconds`：每次按键按下后保持多少毫秒再抬起。
-- `afk.inputMethod`：AFK 的按键发送方式。默认 `SendKeys`，更接近最早的 PowerShell `SendKeys` 脚本；如果游戏不响应，可以改成 `SendInputScanCode` 或 `SendInputVirtualKey` 试兼容性。
-- `afk.sequence.*`：`Sequence` 模式里的 55 秒、0.5 秒、10 秒等时间。
-- `afk.enterEvery10s.delaySeconds`：`EnterEvery10s` 模式每隔多少秒按一次 `Enter`。
-- `afk.macroCombo.cycleDelaySeconds`：`MacroCombo` 每轮完整宏之间额外等待多少秒。设置为 `0` 表示不额外等待。
-- `afk.macroCombo.steps`：`MacroCombo` 的按键步骤，每一项的 `key` 是按键，`waitMilliseconds` 是这次按键后等待多少毫秒。
-- `automation.autoBuyCar.loopCount`：`AutoBuyCar` 默认循环次数。
-- `automation.inputMethod`：车辆自动化的按键发送方式。默认 `SendKeys`，如果游戏不响应可改成 `SendInputScanCode` 或 `SendInputVirtualKey` 试兼容性。
-- `automation.autoBuyCar.steps`：买车流程每轮按键和等待时间。
-- `automation.findNewSubaru.loopCount`：`FindNewSubaru` 默认处理轮数。
-- `automation.findNewSubaru.maxSearchAttempts`：每轮最多搜索次数。
-- `automation.findNewSubaru.afterSelectDelayMilliseconds`：命中并按 `Enter` 选择车辆后，等待多少毫秒再执行 `MacroCombo`。
-- `automation.findNewSubaru.targetKeywords`：OCR 确认车型时必须匹配的关键词。
+- `automation.startupDelaySeconds`：启动自动化后等待多少秒再开始发按键。
+- `automation.keyTapHoldMilliseconds`：每次按键按下后保持多少毫秒再抬起。
+- `automation.inputMethod`：按键发送方式。默认 `SendKeys`，更接近最早的 PowerShell `SendKeys` 脚本；如果别的游戏不响应，可以改成 `SendInputScanCode` 或 `SendInputVirtualKey` 试兼容性（Forza 只认 `SendKeys`）。
+- `automation.autoBuyCar.loopCount` / `automation.autoBuyCar.steps`：`AutoBuyCar` 默认循环次数、每轮按键和等待。
+- `automation.findNewSubaru.*`：`FindNewSubaru` 的轮数、最多搜索次数、识别参数、目标关键词，以及命中选车后执行 `MacroCombo` 前的等待。
+- `automation.sequence.*`：`Sequence` 模式里的行驶等待、两次 `x` 等待、每轮末尾等待。
+- `automation.enterEvery10s.delaySeconds`：`EnterEvery10s` 模式每隔多少秒按一次 `Enter`。
+- `automation.macroCombo.cycleDelaySeconds` / `automation.macroCombo.steps`：`MacroCombo` 每轮宏之间的等待，以及宏的按键步骤（也用作 FindNewSubaru 买车宏）。
 - `ultimate.shareCode`：Ultimate 输入的分享代码，默认 `705399298`。
-- `ultimate.targetKeywords`：Ultimate OCR 严格匹配关键词，默认 `1998`、`斯巴鲁`、`S1`、`790`。
-- `ultimate.sequenceLoopCount`：Ultimate 最后执行多少轮独立 `Sequence`，默认 `80`。
-- `ultimate.sequence.*`：Ultimate 独立 `Sequence` 的等待时间，不读取 AFK 配置。
+- `ultimate.targetKeywords`：Ultimate OCR 严格匹配关键词，默认 `1998`、`斯巴`、`S1`、`790`。
+- `ultimate.sequence.*`：Ultimate 独立 `Sequence` 的等待时间（与 `automation.sequence` 各自独立）。
 
 如果你修改了配置，并且自动备份已经启动，请先停止自动备份，再重新启动，让新配置生效。
 
-## 窗口焦点锁定功能
+## 按键循环模式（原 AFK，现已并入 Automation）
 
-除了备份，项目还带了一个可选的 `Focus Lock` 功能。
+原来独立的 `AFK` 页已经取消，它的三个按键循环模式并入了 `Automation` 页，和 `AutoBuyCar` / `DeleteCar` / `FindNewSubaru` 一起用同一个 Mode 下拉选择，每个模式都能设循环次数或勾 **Forever**（循环到手动停止）。默认仍用 `SendKeys`；要换后端改 `config.json` 的 `automation.inputMethod`，然后停止并重新启动。
 
-它可以列出当前可见的 Windows 窗口。选择一个窗口后，工具会在后台尝试让这个窗口保持前台焦点。
-
-使用方式：
-
-1. 打开 `GameSaveGuardian.cmd`。
-2. 切换到 `Focus Lock` 页面。
-3. 点击 `Refresh Windows`。
-4. 选择一个窗口。
-5. 点击 `Start Focus Lock`。
-6. 不需要时点击 `Stop Focus Lock`。
-
-这个功能会主动把选中的窗口拉回前台，所以可能影响你操作其他程序。使用完一定记得停止。
-
-## 游戏挂机功能
-
-`AFK` 功能用于执行简单按键循环，适合需要重复输入的挂机场景。
-
-现在 AFK 默认使用 `SendKeys` 发送按键。如果你在某个游戏菜单里发现没有反应，可以在 `config.json` 里修改 `afk.inputMethod`，然后停止并重新启动 AFK。
-
-目前有三个模式：
+这三个模式是：
 
 - `Sequence`：执行原来的 `Enter` / `x` 循环。
 - `EnterEvery10s`：每 10 秒按一次 `Enter`。
@@ -259,29 +228,29 @@ Enter
 
 这在工具里会被视为一次 `Enter` 输入，而不是连续按两次 `Enter`。后续的等待时间会继续保留。
 
-每轮 `MacroCombo` 完整执行结束后，工具会读取 `config.json` 里的 `afk.macroCombo.cycleDelaySeconds`，按这个秒数等待，然后再开始下一轮循环。具体每个按键之间等多久，则由 `afk.macroCombo.steps` 里每一步的 `waitMilliseconds` 控制。
+每轮 `MacroCombo` 完整执行结束后，工具会读取 `config.json` 里的 `automation.macroCombo.cycleDelaySeconds`，按这个秒数等待，然后再开始下一轮循环。具体每个按键之间等多久，则由 `automation.macroCombo.steps` 里每一步的 `waitMilliseconds` 控制。
 
-使用方式：
+使用方式（这三个模式现在都在 `Automation` 页里）：
 
 1. 打开 `GameSaveGuardian.cmd`。
-2. 切换到 `AFK` 页面。
-3. 在 `AFK mode` 中选择 `Sequence`、`EnterEvery10s` 或 `MacroCombo`。
-4. 点击 `Start AFK`。
-5. 在提示后 5 秒内切回游戏窗口。
-6. 不需要时点击 `Stop AFK`。
+2. 切换到 `Automation` 页面。
+3. 在 `Mode` 中选择 `Sequence`、`EnterEvery10s` 或 `MacroCombo`。
+4. 设置 `Loop count`，或勾选 `Forever` 循环到手动停止。
+5. 点击 `Start Automation`，在提示后 5 秒内切回游戏窗口。
+6. 不需要时点击 `Stop Automation`。
 
-停止挂机时，工具会额外发送一次 `W` 释放作为安全兜底，避免旧版本或异常残留导致按键像是卡住。
+停止时，工具会额外发送一次 `W` 释放作为安全兜底，避免按键像是卡住。
 
-注意：挂机功能会把按键发送给当前前台窗口。它不会阻止游戏失焦暂停；如果你点击到别的软件，按键可能会发送到别的软件。
+注意：按键会发送给当前前台窗口。它不会阻止游戏失焦暂停；如果你点击到别的软件，按键可能会发送到别的软件。
 
 ## 车辆自动化功能
 
-`Automation` 是独立模块，和备份、焦点锁定、AFK 分开运行。它同样会把按键发送给当前前台窗口，所以启动后需要在倒计时内切回游戏。
+车辆类模式（`AutoBuyCar` / `DeleteCar` / `FindNewSubaru`）和上面的按键循环模式同在 `Automation` 页。`Automation` 和备份独立，但 `Automation` 和 `Ultimate` 不能同时运行。它会把按键发送给当前前台窗口，所以启动后需要在倒计时内切回游戏。
 
-目前有两个模式：
+车辆类模式：
 
 - `AutoBuyCar`：按固定买车流程循环执行。默认一轮是 `Space`、等待 1 秒、`Down`、等待 0.5 秒、`Enter`、等待 1 秒、`Enter`、等待 1 秒、`Enter`，两轮之间等待 1 秒。
-- `FindNewSubaru`：每轮按 `Left` 搜索车辆，最多搜索 50 次；工具会截图当前游戏窗口，检测绿色边框高亮卡片，检查右下角黄色 `全新` 标签，再用 Windows OCR 确认卡片文字包含 `1998` 和 `斯巴鲁`。命中后按 `Enter`，等待 2 秒，然后执行一次 AFK 的 `MacroCombo`。
+- `FindNewSubaru`：每轮按 `Left` 搜索车辆，最多搜索 50 次；工具会截图当前游戏窗口，检测绿色边框高亮卡片，检查右下角黄色 `全新` 标签，再用 Windows OCR 确认卡片文字包含 `1998` 和 `斯巴鲁`。命中后按 `Enter`，等待 2 秒，然后执行一次 `MacroCombo` 买车宏。
 
 使用方式：
 
@@ -294,11 +263,11 @@ Enter
 
 如果检测到 `全新` 但 OCR 不是目标车型，工具会把原因写进 `logs\automation.log` 并继续搜索，直到命中或达到最大搜索次数。车型确认支持完整匹配 `1998` + `斯巴鲁`，也兼容 OCR 识别成 `1998`、`斯`、`巴` 这类模糊文本。
 
-注意：自动化和 AFK 不能同时运行，避免两个后台任务同时发送按键。
+注意：Automation 和 Ultimate 不能同时运行，避免两个后台任务同时发送按键。
 
 ## Ultimate 终极流程
 
-`Ultimate` 是独立模块，不属于备份、焦点锁定、AFK 或 Automation。
+`Ultimate` 是独立模块，和备份、Automation 分开；但 Automation 和 Ultimate 不能同时运行。
 
 它会先执行固定菜单宏，输入分享代码 `705399298`，然后用截图和 Windows OCR 查找当前高亮车辆卡是否严格匹配 `1998`、`斯巴鲁`、`S1`、`790`。命中后按 `Enter`，等待配置里的时间，再执行独立的 80 轮 `Sequence`。
 
@@ -310,7 +279,7 @@ Enter
 4. 在提示后的倒计时内切回游戏窗口。
 5. 不需要时点击 `Stop Ultimate`。
 
-Ultimate 和 AFK、Automation 不能同时运行。Focus Lock 不会被强制禁止，但可能影响窗口焦点。
+Ultimate 和 Automation 不能同时运行。备份独立运行，不受影响。
 
 ## 高级脚本入口
 
@@ -321,15 +290,12 @@ BackupNow.cmd
 StartBackup.cmd
 StopBackup.cmd
 StatusBackup.cmd
-StartAfk.cmd
-StopAfk.cmd
-StatusAfk.cmd
 StartAutomation.cmd
 StopAutomation.cmd
 StatusAutomation.cmd
-StartFocusLock.cmd
-StopFocusLock.cmd
-StatusFocusLock.cmd
+StartUltimate.cmd
+StopUltimate.cmd
+StatusUltimate.cmd
 ```
 
 一般用户不需要关心这些文件。它们主要用于命令行操作、排查问题，或者和其他自动化工具配合。
@@ -348,15 +314,11 @@ runtime\
 
 - `backups\`：存放 zip 备份。
 - `logs\backup.log`：存档备份日志。
-- `logs\afk.log`：挂机日志。
-- `logs\automation.log`：车辆自动化日志。
+- `logs\automation.log`：自动化日志。
 - `logs\ultimate.log`：Ultimate 终极流程日志。
-- `logs\focus-lock.log`：焦点锁定日志。
 - `runtime\watcher.pid`：自动备份后台进程状态。
-- `runtime\afk.pid`：挂机后台进程状态。
-- `runtime\automation.pid`：车辆自动化后台进程状态。
+- `runtime\automation.pid`：自动化后台进程状态。
 - `runtime\ultimate.pid`：Ultimate 后台进程状态。
-- `runtime\focus-lock.pid`：焦点锁定后台进程状态。
 
 如果遇到问题，优先查看 `logs` 目录里的日志。
 
@@ -374,15 +336,11 @@ runtime\
 
    工具会等待写入稳定后备份，但如果系统被直接关机，仍然可能错过最后一次变化。
 
-4. 焦点锁定会影响正常操作。
+4. 按键循环模式会发送真实按键。
 
-   它会尝试把指定窗口拉回前台。如果你发现鼠标键盘操作其他窗口很别扭，先停止焦点锁定。
+   启动 `Sequence` / `EnterEvery10s` / `MacroCombo` 前请确认游戏窗口在前台。不要在聊天框、浏览器、编辑器等窗口处于前台时启动，否则 `Enter`、`x`、`Esc`、`WASD` 等按键可能会输入到错误位置。
 
-5. 挂机功能会发送真实按键。
-
-   启动挂机前请确认游戏窗口在前台。不要在聊天框、浏览器、编辑器等窗口处于前台时启动，否则 `Enter`、`x`、`Esc`、`WASD` 等按键可能会输入到错误位置。
-
-6. 车辆自动化也会发送真实按键，并依赖当前界面状态。
+5. 车辆自动化也会发送真实按键，并依赖当前界面状态。
 
    启动 `AutoBuyCar` 或 `FindNewSubaru` 前，请确认游戏已经停在对应菜单。`FindNewSubaru` 使用截图、像素检测和 Windows OCR，实际效果会受窗口缩放、语言、亮度和界面遮挡影响。
 

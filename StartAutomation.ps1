@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru')][string]$Mode = 'AutoBuyCar',
+    [ValidateSet('AutoBuyCar', 'DeleteCar', 'FindNewSubaru', 'Sequence', 'EnterEvery10s', 'MacroCombo')][string]$Mode = 'AutoBuyCar',
     [int]$LoopCount = -1,
     [int]$StartupDelaySeconds = -1,
     [string]$RecognitionImagePath,
@@ -24,14 +24,6 @@ if ($state.Status -in @('Running', 'RunningUnverified')) {
     exit 0
 }
 Remove-StaleAutomationPid -Paths $paths -State $state
-
-$afkPaths = Get-AfkPaths -AppRoot $scriptRoot
-Initialize-AfkWorkspace -Paths $afkPaths
-$afkState = Get-AfkState -Paths $afkPaths
-if ($afkState.Status -in @('Running', 'RunningUnverified')) {
-    Write-Error "AFK is already running. Stop AFK before starting Automation. AFK PID=$($afkState.Pid)"
-    exit 1
-}
 
 $ultimatePaths = Get-UltimatePaths -AppRoot $scriptRoot
 Initialize-UltimateWorkspace -Paths $ultimatePaths

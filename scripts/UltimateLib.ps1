@@ -267,6 +267,22 @@ function Get-DefaultUltimatePostBuySteps {
     )
 }
 
+function Get-DefaultUltimateSequenceRecoverySteps {
+    # Sequence stuck-recovery macro. Runs when the "重新开始赛事" confirm dialog does NOT appear
+    # after the two X presses (the in-race car got stuck and never reached the finish, so X,X did
+    # not open the restart-event prompt). This backs the menu out and re-enters the race so the
+    # current Sequence lap can be retried from its first keypress. Hard-coded here (not read from
+    # config.json), like the other Ultimate macros. The gamepad RT throttle is released by the
+    # worker BEFORE this macro runs, so it is not part of these key steps.
+    @(
+        [pscustomobject]@{ Key = 'Esc'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'A'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 1000 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 10000 },
+        [pscustomobject]@{ Key = 'Enter'; WaitMilliseconds = 5000 }
+    )
+}
+
 function Get-UltimateConfig {
     [CmdletBinding()]
     param(
@@ -320,6 +336,14 @@ function Get-UltimateConfig {
     $gamepadThrottleEnabled = $true
     $gamepadRightTriggerValue = 255
     $gamepadDllPath = ''
+    # Sequence stuck-recovery: after the two X presses each lap, OCR-check whether the
+    # "重新开始赛事" confirm dialog appeared. If it did not (the car got stuck and never finished),
+    # run the recovery macro, keep the laps already completed, retry the current lap from its first
+    # keypress, and raise the lap total by ExtraLoops. Give up (soft-fail the phase) after
+    # MaxRecoveries consecutive recoveries so a persistently broken game cannot loop forever.
+    $sequenceStuckRecoveryEnabled = $true
+    $sequenceStuckRecoveryExtraLoops = 2
+    $sequenceStuckRecoveryMaxRecoveries = 3
 
     if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         $rawConfig = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
@@ -365,6 +389,15 @@ function Get-UltimateConfig {
                 $gamepadRightTriggerValue = Get-UltimateConfigIntValue -Object $gamepad -Name 'rightTriggerValue' -DefaultValue $gamepadRightTriggerValue
                 $gamepadDllPath = Get-UltimateConfigStringValue -Object $gamepad -Name 'dllPath' -DefaultValue $gamepadDllPath
             }
+
+            if ((Test-UltimateConfigProperty -Object $ultimate -Name 'sequenceStuckRecovery') -and $null -ne $ultimate.sequenceStuckRecovery) {
+                $recovery = $ultimate.sequenceStuckRecovery
+                if ((Test-UltimateConfigProperty -Object $recovery -Name 'enabled') -and $null -ne $recovery.enabled) {
+                    $sequenceStuckRecoveryEnabled = [bool]$recovery.enabled
+                }
+                $sequenceStuckRecoveryExtraLoops = Get-UltimateConfigIntValue -Object $recovery -Name 'extraLoopsPerRecovery' -DefaultValue $sequenceStuckRecoveryExtraLoops
+                $sequenceStuckRecoveryMaxRecoveries = Get-UltimateConfigIntValue -Object $recovery -Name 'maxRecoveries' -DefaultValue $sequenceStuckRecoveryMaxRecoveries
+            }
         }
     }
 
@@ -380,7 +413,9 @@ function Get-UltimateConfig {
         @{ Name = 'ultimate.sequence.xDelayMilliseconds'; Value = $sequenceXDelayMilliseconds },
         @{ Name = 'ultimate.sequence.loopDelaySeconds'; Value = $sequenceLoopDelaySeconds },
         @{ Name = 'ultimate.searchSettleMilliseconds'; Value = $searchSettleMilliseconds },
-        @{ Name = 'ultimate.verticalScanSteps'; Value = $verticalScanSteps }
+        @{ Name = 'ultimate.verticalScanSteps'; Value = $verticalScanSteps },
+        @{ Name = 'ultimate.sequenceStuckRecovery.extraLoopsPerRecovery'; Value = $sequenceStuckRecoveryExtraLoops },
+        @{ Name = 'ultimate.sequenceStuckRecovery.maxRecoveries'; Value = $sequenceStuckRecoveryMaxRecoveries }
     )
     foreach ($check in $nonNegativeChecks) {
         if ($check.Value -lt 0) {
@@ -432,6 +467,10 @@ function Get-UltimateConfig {
         GamepadThrottleEnabled               = $gamepadThrottleEnabled
         GamepadRightTriggerValue             = $gamepadRightTriggerValue
         GamepadDllPath                       = $gamepadDllPath
+        SequenceRecoverySteps                = @(Get-DefaultUltimateSequenceRecoverySteps)
+        SequenceStuckRecoveryEnabled         = $sequenceStuckRecoveryEnabled
+        SequenceStuckRecoveryExtraLoops      = $sequenceStuckRecoveryExtraLoops
+        SequenceStuckRecoveryMaxRecoveries   = $sequenceStuckRecoveryMaxRecoveries
     }
 }
 
@@ -495,6 +534,10 @@ function Resolve-UltimateRuntimeOptions {
         GamepadThrottleEnabled              = $Config.GamepadThrottleEnabled
         GamepadRightTriggerValue            = $Config.GamepadRightTriggerValue
         GamepadDllPath                      = $Config.GamepadDllPath
+        SequenceRecoverySteps               = @($Config.SequenceRecoverySteps)
+        SequenceStuckRecoveryEnabled        = $Config.SequenceStuckRecoveryEnabled
+        SequenceStuckRecoveryExtraLoops     = $Config.SequenceStuckRecoveryExtraLoops
+        SequenceStuckRecoveryMaxRecoveries  = $Config.SequenceStuckRecoveryMaxRecoveries
     }
 }
 

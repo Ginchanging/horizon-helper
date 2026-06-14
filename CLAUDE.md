@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-GameSave Guardian is a **portable Windows PowerShell 5.1 application** — no compilation, no package manager, no SDK. It backs up Xbox game saves and automates keyboard input for Forza Horizon (AFK loops, car-buying menus, share-code car acquisition). The whole thing is WinForms + PowerShell + a few small C# P/Invoke blocks compiled at runtime via `Add-Type`. Everything must stay runnable by double-clicking a `.cmd` on a stock Windows box.
+GameSave Guardian is a **portable Windows PowerShell 5.1 application** — no compilation, no package manager, no SDK. It backs up Xbox game saves and automates keyboard input for Forza Horizon (key-loop grinds, car-buying menus, share-code car acquisition). The whole thing is WinForms + PowerShell + a few small C# P/Invoke blocks compiled at runtime via `Add-Type`. Everything must stay runnable by double-clicking a `.cmd` on a stock Windows box.
 
 ## Commands
 
 ```powershell
-# Smoke test: loads config + computes state for all five subsystems, prints a summary, exits 0.
+# Smoke test: loads config + computes state for the three subsystems, prints a summary, exits 0.
 # This is the closest thing to a test suite — run it after touching any *Lib.ps1 or config.json.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\GameSaveGuardian.ps1 -SelfTest
 
@@ -20,7 +20,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\GameSaveGuardian.ps1 -
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\BuildRelease.ps1 -Version 1.5.0
 
 # Dry-run a worker (logs every key step WITHOUT sending real input) — safe way to test input logic
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File .\scripts\RunAfk.ps1 -AppRoot . -Mode MacroCombo -DryRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File .\scripts\RunAutomation.ps1 -AppRoot . -Mode MacroCombo -LoopCount 2 -DryRun
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File .\scripts\RunUltimate.ps1 -AppRoot . -DryRun -AssumeTargetFound
 ```
 
@@ -28,17 +28,17 @@ There is no lint/unit-test framework. Verification = `-SelfTest`, `-DryRun` work
 
 ## Architecture
 
-### Five independent subsystems, one shared shape
+### Three independent subsystems, one shared shape
 
 | Subsystem | Library (`scripts/`) | Background worker (`scripts/`) | PID / log |
 |-----------|---------------------|-------------------------------|-----------|
 | Backup    | `BackupLib.ps1`     | `WatchBackup.ps1`             | `watcher.pid` / `backup.log` |
-| Focus Lock| `FocusLib.ps1`      | `KeepWindowFocused.ps1`       | `focus-lock.*` |
-| AFK       | `AfkLib.ps1`        | `RunAfk.ps1`                  | `afk.pid` / `afk.log` |
 | Automation| `AutomationLib.ps1` | `RunAutomation.ps1`           | `automation.pid` / `automation.log` |
 | Ultimate  | `UltimateLib.ps1`   | `RunUltimate.ps1`             | `ultimate.pid` / `ultimate.log` |
 
-Every subsystem repeats the **same function set** in its `*Lib.ps1` — learn it once and you know all five:
+`AfkLib.ps1` is **not a subsystem** — it is the shared input/native/virtual-gamepad library (`Send-Afk*`, `Initialize-AfkNative`, `Normalize-AfkKeyName`, `Connect-AfkGamepad`/`Set-AfkGamepadRightTrigger`, `Release-AfkKeys`). Automation and Ultimate both dot-source it. (Focus Lock and the standalone AFK subsystem were removed; AFK's three key-loop modes — `Sequence`, `EnterEvery10s`, `MacroCombo` — are now Automation `-Mode` values alongside `AutoBuyCar`/`DeleteCar`/`FindNewSubaru`. Every mode takes a `-LoopCount` where **0 = Forever** (loop until Stop); the GUI's Forever checkbox sends 0. Their timing lives under `automation.sequence` / `automation.enterEvery10s` / `automation.macroCombo` in `config.json`.)
+
+Every subsystem repeats the **same function set** in its `*Lib.ps1` — learn it once and you know all three:
 
 - `Get-<X>Paths -AppRoot` → pscustomobject of resolved `runtime/`, `logs/`, pid, log paths.
 - `Initialize-<X>Workspace` → create runtime/logs dirs on demand.
@@ -50,11 +50,11 @@ Every subsystem repeats the **same function set** in its `*Lib.ps1` — learn it
 
 Launchers never run the loop in-process. They `Start-Process powershell.exe -WindowStyle Hidden -PassThru` pointing at the worker script, then poll `Get-<X>State` up to ~10× for confirmation. Workers run an infinite loop until killed; `Stop*` finds the PID and `Stop-Process -Force`.
 
-`Get-<X>State` is the heart of single-instance safety. It reads the pid file, confirms the process exists, then **verifies the process command line contains the worker script name** (e.g. `runafk.ps1`) via `Get-CimInstance Win32_Process`. Possible `Status` values you'll branch on everywhere: `Stopped`, `Running`, `RunningUnverified` (process alive but command line unreadable), `Stale` (pid file points at a dead process), `InvalidPid`, `PidConflict` (pid reused by an unrelated process). Treat `Running` and `RunningUnverified` together as "is running".
+`Get-<X>State` is the heart of single-instance safety. It reads the pid file, confirms the process exists, then **verifies the process command line contains the worker script name** (e.g. `runautomation.ps1`) via `Get-CimInstance Win32_Process`. Possible `Status` values you'll branch on everywhere: `Stopped`, `Running`, `RunningUnverified` (process alive but command line unreadable), `Stale` (pid file points at a dead process), `InvalidPid`, `PidConflict` (pid reused by an unrelated process). Treat `Running` and `RunningUnverified` together as "is running".
 
 ### Three entry layers (all thin wrappers over the libs)
 
-1. **GUI** — `GameSaveGuardian.ps1` dot-sources all five libs, exposes one tab per subsystem, and wraps each operation in `Start-App<X>` / `Stop-App<X>` + `Invoke-AppSafely` (catches → MessageBox).
+1. **GUI** — `GameSaveGuardian.ps1` dot-sources the libs, exposes one tab per subsystem (Ultimate, Backup, Automation), and wraps each operation in `Start-App<X>` / `Stop-App<X>` + `Invoke-AppSafely` (catches → MessageBox).
 2. **CLI launchers** (repo root) — `Start<X>.ps1` / `Stop<X>.ps1` / `Status<X>.ps1`, each with a `.cmd` twin that just calls the `.ps1` with `-NoProfile -ExecutionPolicy Bypass [-STA]` and `pause`s.
 3. **Workers** — the actual loops in `scripts/`.
 
@@ -65,7 +65,7 @@ The GUI's `Start-App*` and the corresponding `Start*.ps1` contain **near-duplica
 `AfkLib.ps1` owns keyboard input for *every* subsystem (Automation and Ultimate dot-source it). Key facts:
 
 - `Send-AfkNamedKeyTap` / `Send-AfkDigitKeyTap` dispatch over three `inputMethod`s: `SendKeys` (default, WinForms `SendWait`), `SendInputScanCode`, `SendInputVirtualKey` (both via the runtime-compiled `GameAfkNative` C# class doing `SendInput` P/Invoke). **Forza Horizon ignores the raw `SendInput` backends entirely** (no keys detected in-game — verified 2026-06-10; same mechanism as it ignoring injected keyboard while driving), so for this game `inputMethod` must stay `SendKeys`. Its rare dropped/doubled key is handled by FindNewSubaru's desync soft-fail recovery, not by switching backends.
-- Input goes to the **current foreground window** after a startup countdown — there is no window targeting for key sends. Hence AFK / Automation / Ultimate are **mutually exclusive** (each checks the other two's state at startup and refuses to start). Backup and Focus Lock are independent and may run alongside anything.
+- Input goes to the **current foreground window** after a startup countdown — there is no window targeting for key sends. Hence Automation and Ultimate are **mutually exclusive** (the GUI's `Start-App*` check each other's state and refuse to start; the Ultimate worker also re-checks Automation). Backup is independent and may run alongside either.
 - `Release-AfkKeys` (a `W` key-up) is fired on every stop/exit as a safety net against a stuck movement key.
 
 ### Computer vision (AutomationLib) — for the car-finding modes
@@ -84,7 +84,7 @@ The GUI's `Start-App*` and the corresponding `Start*.ps1` contain **near-duplica
 - Config/log I/O uses `-Encoding UTF8`; pid files use `-Encoding ASCII`. Config reads guard every field with `Test-*ConfigProperty` before access (StrictMode will throw otherwise).
 - All runtime file writes (log, pid, progress, counters, pause/target flags) go through each lib's `Write-<X>FileWithRetry`, never bare `Set-Content`/`Add-Content`. PS 5.1 `Set-Content` needs the target momentarily free of *any* other open handle — a GUI poll or antivirus scan at the wrong instant throws (mostly `ArgumentException` "stream was not readable", sometimes `IOException` "in use by another process"; this killed a real Ultimate run 2026-06-10). The helper retries 5×60 ms with an untyped catch, then drops the write (log/progress/count) or throws only for `-ThrowOnFailure` callers (pid, pause, focus target).
 - Functions return `[pscustomobject]`. Config presence is checked via `$obj.PSObject.Properties.Name -contains 'x'`, not `$obj.x -ne $null`.
-- AFK/Automation/Ultimate workers must be launched `-STA` (SendKeys + WinForms + OCR need it); the Backup watcher does not.
+- Automation/Ultimate workers must be launched `-STA` (SendKeys + WinForms + OCR need it); the Backup watcher does not.
 
 ## Gotchas
 

@@ -9,6 +9,7 @@ param(
     [int]$WorkflowLoopCount = -1,
     [string]$RecognitionImagePath,
     [switch]$AssumeTargetFound,
+    [switch]$AssumeSequenceStuck,
     [switch]$DryRun
 )
 
@@ -227,6 +228,75 @@ function Test-UltimateCurrentTarget {
     return $recognition
 }
 
+function Test-UltimateSequenceRestartDialog {
+    # Returns $true if the "重新开始赛事" restart-event confirm dialog is on screen (the normal
+    # state right after the two X presses), $false if it is not (the in-race car got stuck and
+    # never finished, so X,X never opened the prompt). Captures the foreground window, crops the
+    # centered dialog region to cut background-menu OCR noise, runs the zh-Hans WinRT OCR, and
+    # looks for the restart keyword. Retries a few times so a single transient OCR miss does not
+    # falsely report "absent" -- a false "absent" would fire the recovery macro into a healthy
+    # dialog and break the loop, so the check is biased toward "present" (any hit wins).
+    param(
+        [Parameter(Mandatory = $true)][Int64]$TargetWindow
+    )
+
+    # Keyword 重新开始 built from char codes (like ultimate.targetKeywords' 斯巴) so the match
+    # survives the source file being re-saved in a non-UTF8 encoding.
+    $restartKeyword = [string]([char]0x91CD) + [string]([char]0x65B0) + [string]([char]0x5F00) + [string]([char]0x59CB)
+    $tempRoot = Join-Path $paths.RuntimeRoot 'ultimate-ocr'
+    $attempts = 3
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        $cropPath = $null
+        try {
+            $bitmap = New-AutomationWindowBitmap -WindowHandle $TargetWindow
+            try {
+                if (-not (Test-Path -LiteralPath $tempRoot -PathType Container)) {
+                    New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+                }
+                $rect = [pscustomobject]@{
+                    X      = [int]($bitmap.Width * 0.25)
+                    Y      = [int]($bitmap.Height * 0.28)
+                    Width  = [int]($bitmap.Width * 0.50)
+                    Height = [int]($bitmap.Height * 0.44)
+                }
+                $cropPath = Join-Path $tempRoot ("seq-dialog-{0}.png" -f ([guid]::NewGuid().ToString('N')))
+                Save-AutomationBitmapCrop -Bitmap $bitmap -Rect $rect -Path $cropPath
+                $ocr = Invoke-AutomationOcrImagePath -ImagePath $cropPath
+                if ($ocr.Success -and (Test-AutomationKeywordMatch -Text $ocr.Text -Keywords @($restartKeyword))) {
+                    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence restart dialog detected (attempt $attempt/$attempts). OcrText='$($ocr.Text)'"
+                    return $true
+                }
+                Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence restart dialog NOT detected (attempt $attempt/$attempts). OcrSuccess=$($ocr.Success) OcrText='$($ocr.Text)' Error=$($ocr.Error)"
+            }
+            finally {
+                $bitmap.Dispose()
+            }
+        }
+        catch {
+            Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Sequence restart dialog OCR attempt $attempt/$attempts failed: $($_.Exception.Message)"
+        }
+        finally {
+            if ($cropPath -and (Test-Path -LiteralPath $cropPath -PathType Leaf)) {
+                try { Remove-Item -LiteralPath $cropPath -Force -ErrorAction Stop } catch { }
+            }
+        }
+        if ($attempt -lt $attempts) { Start-Sleep -Milliseconds 400 }
+    }
+    return $false
+}
+
+function Invoke-UltimateSequenceStuckRecovery {
+    # Recovery when the Sequence restart dialog did not appear (car stuck). First release the
+    # gamepad RT throttle so the car is not held forward, then run the recovery macro (Esc, A,
+    # Enter x3) to back out and re-enter the race. The macro's per-step waits live in the step
+    # objects; Invoke-UltimateKeySteps skips both keys and waits under DryRun.
+    if (-not $DryRun -and $options.GamepadThrottleEnabled) {
+        try { Set-AfkGamepadRightTrigger -Value 0 } catch { }
+    }
+    Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Sequence stuck recovery: RT released, running recovery macro. Steps=$(@($options.SequenceRecoverySteps).Count)"
+    Invoke-UltimateKeySteps -Steps $options.SequenceRecoverySteps -Mode 'SequenceRecovery'
+}
+
 function Invoke-UltimateTargetSearch {
     param(
         [Int64]$TargetWindow
@@ -362,11 +432,27 @@ function Invoke-UltimateTargetConfirm {
 }
 
 function Invoke-UltimateSequenceLoops {
-    for ($loop = 1; $loop -le $options.SequenceLoopCount; $loop++) {
+    param(
+        [Int64]$TargetWindow = 0
+    )
+
+    # Lap total is local so a stuck-recovery can raise it (+ExtraLoops) without touching config.
+    # The loop counter only advances on a SUCCESSFUL lap (restart dialog detected after X,X). A
+    # stuck lap is retried in place from its first keypress, so the laps already completed are kept.
+    $effectiveTotal = $options.SequenceLoopCount
+    $recoveryCount = 0
+    $maxRecoveries = $options.SequenceStuckRecoveryMaxRecoveries
+    # Stuck detection runs only in a real run with a captured window, or when forced for testing
+    # via -AssumeSequenceStuck. DryRun without the switch leaves the original behaviour untouched.
+    $detectionActive = $options.SequenceStuckRecoveryEnabled -and (((-not $DryRun) -and $TargetWindow -ne 0) -or $AssumeSequenceStuck)
+    Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence phase started. Total=$effectiveTotal StuckDetection=$detectionActive MaxRecoveries=$maxRecoveries ExtraLoopsPerRecovery=$($options.SequenceStuckRecoveryExtraLoops) TargetWindow=0x$('{0:X}' -f $TargetWindow)"
+
+    $loop = 1
+    while ($loop -le $effectiveTotal) {
         # Safe pause point: halt before starting this race, not mid-drive (the dominant grind).
-        Wait-UltimatePauseGate -Context "sequence $loop/$($options.SequenceLoopCount)"
-        Set-UltimatePhaseProgress -Phase 'Sequence' -Current $loop -Total $options.SequenceLoopCount
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence loop started. Loop=$loop Total=$($options.SequenceLoopCount)"
+        Wait-UltimatePauseGate -Context "sequence $loop/$effectiveTotal"
+        Set-UltimatePhaseProgress -Phase 'Sequence' -Current $loop -Total $effectiveTotal
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence loop started. Loop=$loop Total=$effectiveTotal"
 
         $enter1 = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence key sent. Loop=$loop Key=Enter WaitSeconds=$($options.SequenceEnterDelaySeconds) Throttle=$($options.GamepadThrottleEnabled) InputMethod=$($enter1.Method) DryRun=$DryRun"
@@ -381,11 +467,32 @@ function Invoke-UltimateSequenceLoops {
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence key sent. Loop=$loop Key=X WaitMs=$($options.SequenceXDelayMilliseconds) InputMethod=$($x2.Method) DryRun=$DryRun"
         Wait-UltimateMilliseconds -Milliseconds $options.SequenceXDelayMilliseconds
 
+        # Stuck check: after X,X the "重新开始赛事" confirm dialog should be up. If it is not, the car
+        # got stuck and never finished -- recover, keep completed laps, and retry THIS lap from the
+        # top (its first Enter). The final confirm Enter below runs only when the dialog is present.
+        if ($detectionActive) {
+            Wait-UltimateMilliseconds -Milliseconds 600
+            $dialogPresent = if ($AssumeSequenceStuck) { $false } else { Test-UltimateSequenceRestartDialog -TargetWindow $TargetWindow }
+            if (-not $dialogPresent) {
+                $recoveryCount++
+                Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Sequence restart dialog missing after X,X (car likely stuck). Recovery $recoveryCount/$maxRecoveries. Loop=$loop Total=$effectiveTotal"
+                if ($recoveryCount -gt $maxRecoveries) {
+                    Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Sequence stuck recovery exceeded max ($maxRecoveries); soft-failing the Sequence phase. The outer workflow loop's next Prelude will re-home the menu."
+                    return
+                }
+                Invoke-UltimateSequenceStuckRecovery
+                $effectiveTotal += $options.SequenceStuckRecoveryExtraLoops
+                Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Retrying current lap $loop from its first keypress (completed laps kept). New total=$effectiveTotal"
+                continue
+            }
+        }
+
         $enter2 = Send-AfkNamedKeyTap -Key 'Enter' -HoldMilliseconds $options.KeyTapHoldMilliseconds -InputMethod $options.InputMethod -DryRun:$DryRun
         Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence key sent. Loop=$loop Key=Enter WaitSeconds=$($options.SequenceLoopDelaySeconds) InputMethod=$($enter2.Method) DryRun=$DryRun"
         Wait-UltimateSeconds -Seconds $options.SequenceLoopDelaySeconds
 
-        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence loop completed. Loop=$loop Total=$($options.SequenceLoopCount)"
+        Write-UltimateLog -Paths $paths -Level 'INFO' -Message "Sequence loop completed. Loop=$loop Total=$effectiveTotal"
+        $loop++
     }
 }
 
@@ -426,14 +533,6 @@ $state = Get-UltimateState -Paths $paths
 if ($state.Status -in @('Running', 'RunningUnverified') -and $state.Pid -ne $PID) {
     Write-UltimateLog -Paths $paths -Level 'WARN' -Message "Ultimate already running. Existing PID=$($state.Pid). New PID=$PID exits."
     exit 0
-}
-
-$afkPaths = Get-AfkPaths -AppRoot $paths.AppRoot
-Initialize-AfkWorkspace -Paths $afkPaths
-$afkState = Get-AfkState -Paths $afkPaths
-if ($afkState.Status -in @('Running', 'RunningUnverified')) {
-    Write-UltimateLog -Paths $paths -Level 'ERROR' -Message "Cannot start Ultimate while AFK is running. AFK PID=$($afkState.Pid)"
-    throw 'AFK is already running. Stop AFK before starting Ultimate.'
 }
 
 $automationPaths = Get-AutomationPaths -AppRoot $paths.AppRoot
@@ -551,7 +650,7 @@ try {
             Invoke-UltimateTargetConfirm
         }
         if (Test-UltimateShouldRunStep -StepNumber 10 -StepName 'Sequence') {
-            Invoke-UltimateSequenceLoops
+            Invoke-UltimateSequenceLoops -TargetWindow $targetWindow
         }
 
         if (Test-UltimateShouldRunStep -StepNumber 11 -StepName 'PostSequence') {

@@ -3,7 +3,7 @@
   "backupRoot": "backups",
   "debounceSeconds": 30,
   "maxBackups": 30,
-  "afk": {
+  "automation": {
     "startupDelaySeconds": 5,
     "keyTapHoldMilliseconds": 50,
     "inputMethod": "SendKeys",
@@ -53,12 +53,7 @@
         { "key": "S", "waitMilliseconds": 500 },
         { "key": "Enter", "waitMilliseconds": 0 }
       ]
-    }
-  },
-  "automation": {
-    "startupDelaySeconds": 5,
-    "keyTapHoldMilliseconds": 50,
-    "inputMethod": "SendKeys",
+    },
     "autoBuyCar": {
       "loopCount": 33,
       "betweenLoopsMilliseconds": 1000,
@@ -135,6 +130,11 @@
       "enabled": true,
       "rightTriggerValue": 255,
       "dllPath": ""
+    },
+    "sequenceStuckRecovery": {
+      "enabled": true,
+      "extraLoopsPerRecovery": 2,
+      "maxRecoveries": 3
     }
   }
 }
